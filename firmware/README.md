@@ -1,23 +1,22 @@
+# Build
 
-## Build
-
-### Fetch Dependencies
+## Fetch Dependencies
 
 ```bash
 python3 ./fetch_repos.py
 ```
 
-### Tool Chains
+## Tool Chains
 
 [ESP-IDF v5.5.4](https://docs.espressif.com/projects/esp-idf/en/v5.5.4/esp32s3/index.html)
 
-### Build
+## Build
 
 ```bash
 idf.py build
 ```
 
-### Flash
+## Flash
 
 ```bash
 idf.py flash

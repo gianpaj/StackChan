@@ -68,6 +68,12 @@ public:
             ESP_LOGI(TAG, "Set charge current success");
         }
 
+        // Enable PEK IRQs so STATUS registers are populated:
+        //   0x40 bit0 = positive edge (released), bit1 = negative edge (pressed)
+        //   0x43 bit5 = short press event
+        WriteReg(0x40, 0x03);
+        WriteReg(0x43, 0x20);
+
         SetBrightness(0);
     }
 
@@ -123,6 +129,19 @@ public:
         // Treat any non-discharging state as externally powered so a plugged-in cable
         // still counts even after the battery is full.
         return current_direction != 2 || is_charging_done;
+    }
+
+    // AXP2101 IRQ Status 3 (0x4B): bit 5 = short press event, W1C.
+    // IRQ must be enabled first (done in constructor: 0x43 bit 5).
+    bool IsPekShortPressed()
+    {
+        int status = ReadReg(0x4B);
+        if (status < 0) return false;
+        if (status & 0x20) {
+            WriteReg(0x4B, 0x20);  // W1C — clear just this bit
+            return true;
+        }
+        return false;
     }
 };
 
@@ -544,6 +563,11 @@ public:
             power_save_timer_->WakeUp();
         }
         WifiBoard::SetPowerSaveLevel(level);
+    }
+
+    virtual bool IsPowerButtonPressed() override
+    {
+        return pmic_->IsPekShortPressed();
     }
 
     virtual Backlight* GetBacklight() override

@@ -43,7 +43,7 @@ extern "C" void app_main(void)
 
         GetMooncake().update();
 
-        if (GetHAL().isXiaozhiStartRequested()) {
+        if (GetHAL().isXiaozhiStartRequested() || GetHAL().isOpenAiStartRequested()) {
             break;
         }
     }
@@ -52,6 +52,11 @@ extern "C" void app_main(void)
     GetMooncake().uninstallAllApps();
     DestroyMooncake();
 
-    // Start xiaozhi, never returns
-    GetHAL().startXiaozhi();
+    if (GetHAL().isOpenAiStartRequested()) {
+        // Start OpenAI Realtime, never returns
+        GetHAL().startOpenAi();
+    } else {
+        // Start xiaozhi, never returns
+        GetHAL().startXiaozhi();
+    }
 }

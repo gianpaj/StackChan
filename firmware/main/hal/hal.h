@@ -201,6 +201,17 @@ public:
     XiaozhiConfig_t getXiaozhiConfig();
     void setXiaozhiConfig(XiaozhiConfig_t config);
 
+    /* --------------------------------- OpenAI --------------------------------- */
+    void requestOpenAiStart()
+    {
+        _openai_start_requested = true;
+    }
+    bool isOpenAiStartRequested()
+    {
+        return _openai_start_requested;
+    }
+    void startOpenAi();
+
     /* ----------------------------------- BLE ---------------------------------- */
     uitk::Signal<const char*> onBleMotionData;
     uitk::Signal<const char*> onBleAvatarData;
@@ -286,6 +297,7 @@ public:
 
 private:
     bool _xiaozhi_start_requested = false;
+    bool _openai_start_requested  = false;
 
     void xiaozhi_board_init();
     void lvgl_init();

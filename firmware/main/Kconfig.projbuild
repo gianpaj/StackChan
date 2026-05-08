@@ -911,6 +911,21 @@ endmenu
 
 endmenu
 
+menu "OpenAI Configuration"
+
+config OPENAI_API_KEY
+    string "OpenAI API Key"
+    default ""
+    help
+        Your OpenAI API key (sk-...).
+        Set via environment variable before building:
+            export CONFIG_OPENAI_API_KEY="sk-your-key-here"
+            idf.py build && idf.py flash
+        Written to NVS on first boot; subsequent boots read from NVS.
+        Leave empty if you will provision the key another way.
+
+endmenu
+
 menu "BLE prph Configuration"
 
     choice EXAMPLE_USE_IO_TYPE
