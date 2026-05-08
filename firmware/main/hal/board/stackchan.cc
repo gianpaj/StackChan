@@ -17,6 +17,7 @@
 #include <esp_lcd_ili9341.h>
 #include <esp_timer.h>
 #include <algorithm>
+#include <atomic>
 #include "stackchan_camera.h"
 #include "hal_bridge.h"
 
@@ -61,18 +62,22 @@ public:
         WriteReg(0x95, 33 - 5);
         WriteReg(0x27, 0x00);
 
+        // PWRON button IRQ setup:
+        //   Reg 0x41 = IRQ Enable 1: bits 5,4,3,2 → short-press, long-press, +edge, -edge
+        //   Reg 0x49 = IRQ Status 1: same bit layout, write-1-to-clear (sticky)
+        WriteReg(0x41, 0x3C);  // enable PWRON IRQs (bit-5 short, bit-4 long, bit-3 +edge, bit-2 -edge)
+        WriteReg(0x48, 0xFF);  // clear any latched IRQs
+        WriteReg(0x49, 0xFF);
+        WriteReg(0x4A, 0xFF);
+        ESP_LOGI(TAG, "PEK init: IRQ_EN1=0x%02X IRQ_ST1=0x%02X (cleared)",
+                 (unsigned)(ReadReg(0x41) & 0xFF), (unsigned)(ReadReg(0x49) & 0xFF));
+
         auto ret = setChargerConstantCurr(XPOWERS_AXP2101_CHG_CUR_700MA);
         if (!ret) {
             ESP_LOGE(TAG, "Set charge current failed");
         } else {
             ESP_LOGI(TAG, "Set charge current success");
         }
-
-        // Enable PEK IRQs so STATUS registers are populated:
-        //   0x40 bit0 = positive edge (released), bit1 = negative edge (pressed)
-        //   0x43 bit5 = short press event
-        WriteReg(0x40, 0x03);
-        WriteReg(0x43, 0x20);
 
         SetBrightness(0);
     }
@@ -131,40 +136,41 @@ public:
         return current_direction != 2 || is_charging_done;
     }
 
-    // Read all four AXP2101 IRQ status registers and log any non-zero values
-    // so we can discover which bit/register the power button actually uses.
+    // Polls AXP2101 IRQ Status 1 (reg 0x49). Returns true once per short press.
+    // Status bits are sticky and cleared by writing 1 back. Safe to call rapidly.
+    // Must run from a context that can do I2C — use the timer task, not WS task.
     bool IsPekShortPressed()
     {
-        int s0 = ReadReg(0x48);  // PKEY pos/neg edge
-        int s1 = ReadReg(0x49);
-        int s2 = ReadReg(0x4A);
-        int s3 = ReadReg(0x4B);  // PKEY short/long press
+        static uint32_t poll_n = 0;
+        poll_n++;
 
-        if (s0 > 0 || s1 > 0 || s2 > 0 || s3 > 0) {
-            ESP_LOGI(TAG, "AXP IRQ status: 0x48=%02X 0x49=%02X 0x4A=%02X 0x4B=%02X",
-                     s0 < 0 ? 0 : s0, s1 < 0 ? 0 : s1,
-                     s2 < 0 ? 0 : s2, s3 < 0 ? 0 : s3);
+        int st1 = ReadReg(0x49);
+        if (st1 < 0) {
+            if ((poll_n % 250) == 1) ESP_LOGW(TAG, "PEK poll #%lu: I2C read err", (unsigned long)poll_n);
+            return false;
         }
 
-        // Short press (0x4B bit 5)
-        if (s3 >= 0 && (s3 & 0x20)) {
-            WriteReg(0x4B, 0x20);
-            ESP_LOGI(TAG, "PEK short press (0x4B.5)");
-            return true;
+        // Heartbeat every ~5 s at 20 ms cadence — proves polling is live.
+        if ((poll_n % 250) == 1) {
+            int st0 = ReadReg(0x48);
+            int st2 = ReadReg(0x4A);
+            ESP_LOGI(TAG, "PEK poll #%lu: IRQ_ST 0x48=0x%02X 0x49=0x%02X 0x4A=0x%02X",
+                     (unsigned long)poll_n,
+                     (unsigned)(st0 & 0xFF), (unsigned)(st1 & 0xFF), (unsigned)(st2 & 0xFF));
         }
-        // Positive edge = released (0x48 bit 0) — fallback
-        if (s0 >= 0 && (s0 & 0x01)) {
-            WriteReg(0x48, 0x01);
-            ESP_LOGI(TAG, "PEK released (0x48.0)");
-            return true;
-        }
-        // Negative edge = pressed (0x48 bit 1) — fallback
-        if (s0 >= 0 && (s0 & 0x02)) {
-            WriteReg(0x48, 0x02);
-            ESP_LOGI(TAG, "PEK pressed (0x48.1)");
-            return true;
-        }
-        return false;
+
+        // bit 5 = PWRON_SHORT, bit 4 = PWRON_LONG, bit 3 = +edge, bit 2 = -edge
+        const uint8_t kPekMask = 0x3C;
+        uint8_t hit = (uint8_t)st1 & kPekMask;
+        if (!hit) return false;
+
+        // Clear all PEK-related IRQ bits we just consumed.
+        WriteReg(0x49, hit);
+        ESP_LOGI(TAG, "PEK IRQ fired: 0x49 bits=0x%02X (cleared)", (unsigned)hit);
+
+        // Trigger on press-down (+edge, bit 3) or short-press IRQ (bit 5).
+        // Empirical: this CoreS3 only emits bit 3 reliably; bit 5 / bit 2 don't fire.
+        return (hit & 0x28) != 0;
     }
 };
 
@@ -290,6 +296,7 @@ private:
     hal_bridge::XiaozhiConfig_t xiaozhi_config_;
     bool last_power_save_enabled_      = false;
     int64_t last_power_state_check_ms_ = 0;
+    std::atomic<bool> pek_triggered_{false};
 
     bool ShouldEnablePowerSave(bool has_external_power, bool is_discharging) const
     {
@@ -319,6 +326,13 @@ private:
         last_power_state_check_ms_ = now_ms;
 
         UpdatePowerSaveEnabled(pmic_->IsExternalPowerConnected(), pmic_->IsDischarging());
+    }
+
+    void PollPowerButton()
+    {
+        if (pmic_->IsPekShortPressed()) {
+            pek_triggered_.store(true, std::memory_order_relaxed);
+        }
     }
 
     void InitializePowerSaveTimer()
@@ -425,6 +439,7 @@ private:
                     M5StackCoreS3Board* board = (M5StackCoreS3Board*)arg;
                     board->PollTouchpad();
                     board->PollPowerSaveState();
+                    board->PollPowerButton();
                 },
             .arg                   = this,
             .dispatch_method       = ESP_TIMER_TASK,
@@ -590,7 +605,7 @@ public:
 
     virtual bool IsPowerButtonPressed() override
     {
-        return pmic_->IsPekShortPressed();
+        return pek_triggered_.exchange(false, std::memory_order_relaxed);
     }
 
     virtual Backlight* GetBacklight() override

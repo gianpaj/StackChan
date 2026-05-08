@@ -494,15 +494,8 @@ static void _openai_ws_task(void* param)
 
     bool connected = true;
     uint32_t last_reconnect = 0;
-    uint32_t loop_count = 0;
     while (true) {
         vTaskDelay(pdMS_TO_TICKS(20));
-        loop_count++;
-
-        // Heartbeat: confirm this loop is running (every ~10 s)
-        if (loop_count % 500 == 1) {
-            ESP_LOGI(_tag, "WS loop alive (press PWR to toggle)");
-        }
 
         // PWR button: toggle connection on/off
         if (Board::GetInstance().IsPowerButtonPressed()) {
