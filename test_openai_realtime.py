@@ -39,6 +39,61 @@ SESSION_UPDATE = {
                 }
             }
         },
+        "tools": [
+            {
+                "type": "function",
+                "name": "set_led_color",
+                "description": "Set the color of the robot's built-in LED lights. Values 0-168. Examples: Red=(168,0,0), Green=(0,168,0), Blue=(0,0,168), Off=(0,0,0).",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "red":   {"type": "integer", "minimum": 0, "maximum": 168},
+                        "green": {"type": "integer", "minimum": 0, "maximum": 168},
+                        "blue":  {"type": "integer", "minimum": 0, "maximum": 168},
+                    },
+                    "required": ["red", "green", "blue"],
+                },
+            },
+            {
+                "type": "function",
+                "name": "set_head_angles",
+                "description": "Move the robot head. Yaw is horizontal (-128=left, 128=right). Pitch is vertical (0=level, 90=up). Speed 100-1000.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "yaw":   {"type": "integer", "minimum": -128, "maximum": 128},
+                        "pitch": {"type": "integer", "minimum": 0,    "maximum": 90},
+                        "speed": {"type": "integer", "minimum": 100,  "maximum": 1000},
+                    },
+                    "required": ["yaw", "pitch", "speed"],
+                },
+            },
+            {
+                "type": "function",
+                "name": "get_head_angles",
+                "description": "Get current yaw/pitch head position in degrees.",
+                "parameters": {"type": "object", "properties": {}},
+            },
+            {
+                "type": "function",
+                "name": "set_volume",
+                "description": "Set the speaker volume (0-100).",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "volume": {"type": "integer", "minimum": 0, "maximum": 100},
+                    },
+                    "required": ["volume"],
+                },
+            },
+            {
+                "type": "function",
+                "name": "get_battery",
+                "description": "Get the current battery level and charging status.",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        ],
+        "tool_choice": "auto",
     },
 }
 # ─────────────────────────────────────────────────────────────────────────────

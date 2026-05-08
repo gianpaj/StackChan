@@ -131,14 +131,37 @@ public:
         return current_direction != 2 || is_charging_done;
     }
 
-    // AXP2101 IRQ Status 3 (0x4B): bit 5 = short press event, W1C.
-    // IRQ must be enabled first (done in constructor: 0x43 bit 5).
+    // Read all four AXP2101 IRQ status registers and log any non-zero values
+    // so we can discover which bit/register the power button actually uses.
     bool IsPekShortPressed()
     {
-        int status = ReadReg(0x4B);
-        if (status < 0) return false;
-        if (status & 0x20) {
-            WriteReg(0x4B, 0x20);  // W1C — clear just this bit
+        int s0 = ReadReg(0x48);  // PKEY pos/neg edge
+        int s1 = ReadReg(0x49);
+        int s2 = ReadReg(0x4A);
+        int s3 = ReadReg(0x4B);  // PKEY short/long press
+
+        if (s0 > 0 || s1 > 0 || s2 > 0 || s3 > 0) {
+            ESP_LOGI(TAG, "AXP IRQ status: 0x48=%02X 0x49=%02X 0x4A=%02X 0x4B=%02X",
+                     s0 < 0 ? 0 : s0, s1 < 0 ? 0 : s1,
+                     s2 < 0 ? 0 : s2, s3 < 0 ? 0 : s3);
+        }
+
+        // Short press (0x4B bit 5)
+        if (s3 >= 0 && (s3 & 0x20)) {
+            WriteReg(0x4B, 0x20);
+            ESP_LOGI(TAG, "PEK short press (0x4B.5)");
+            return true;
+        }
+        // Positive edge = released (0x48 bit 0) — fallback
+        if (s0 >= 0 && (s0 & 0x01)) {
+            WriteReg(0x48, 0x01);
+            ESP_LOGI(TAG, "PEK released (0x48.0)");
+            return true;
+        }
+        // Negative edge = pressed (0x48 bit 1) — fallback
+        if (s0 >= 0 && (s0 & 0x02)) {
+            WriteReg(0x48, 0x02);
+            ESP_LOGI(TAG, "PEK pressed (0x48.1)");
             return true;
         }
         return false;

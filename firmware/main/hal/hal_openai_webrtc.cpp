@@ -85,13 +85,21 @@ static std::vector<uint8_t> base64_decode(const std::string& b64)
 /*                            OpenAI session task                             */
 /* -------------------------------------------------------------------------- */
 
+struct PendingToolCall {
+    std::string call_id;
+    std::string name;
+    std::string args;  // accumulated from deltas
+};
+
 struct OpenAiContext {
     std::unique_ptr<WebSocket> ws;
     SemaphoreHandle_t           ws_mutex;
     bool                        session_ready        = false;
     bool                        speaking             = false;
     int                         speaking_modifier_id = -1;
-    uint32_t                    speaking_stop_ms     = 0;  // tick when AI stopped speaking
+    uint32_t                    speaking_stop_ms     = 0;
+    PendingToolCall             pending_tool;
+    bool                        has_pending_tool     = false;
 };
 
 static void _send_json(OpenAiContext& ctx, const ArduinoJson::JsonDocument& doc)
@@ -124,8 +132,137 @@ static void _configure_session(OpenAiContext& ctx)
     turn["silence_duration_ms"] = 600;
     turn["interrupt_response"]  = true;
 
+    // Tools — mirrors hal_mcp.cpp for the Xiaozhi path
+    session["tool_choice"] = "auto";
+    auto tools = session["tools"].to<ArduinoJson::JsonArray>();
+
+    {   // set_led_color
+        auto t = tools.add<ArduinoJson::JsonObject>();
+        t["type"] = "function";
+        t["name"] = "set_led_color";
+        t["description"] = "Set the color of the robot's built-in LED lights (0-168 each). Examples: Red=(168,0,0), Green=(0,168,0), Blue=(0,0,168), Off=(0,0,0).";
+        auto p = t["parameters"].to<ArduinoJson::JsonObject>();
+        p["type"] = "object";
+        p["properties"]["red"]["type"]   = "integer";
+        p["properties"]["green"]["type"] = "integer";
+        p["properties"]["blue"]["type"]  = "integer";
+        p["required"].add("red"); p["required"].add("green"); p["required"].add("blue");
+    }
+    {   // set_head_angles
+        auto t = tools.add<ArduinoJson::JsonObject>();
+        t["type"] = "function";
+        t["name"] = "set_head_angles";
+        t["description"] = "Move the robot head. Yaw: horizontal (-128=left, 128=right). Pitch: vertical (0=level, 90=up). Speed: 100-1000 (150=natural).";
+        auto p = t["parameters"].to<ArduinoJson::JsonObject>();
+        p["type"] = "object";
+        p["properties"]["yaw"]["type"]   = "integer";
+        p["properties"]["pitch"]["type"] = "integer";
+        p["properties"]["speed"]["type"] = "integer";
+        p["required"].add("yaw"); p["required"].add("pitch"); p["required"].add("speed");
+    }
+    {   // get_head_angles
+        auto t = tools.add<ArduinoJson::JsonObject>();
+        t["type"] = "function";
+        t["name"] = "get_head_angles";
+        t["description"] = "Get current yaw/pitch head position in degrees.";
+        auto p = t["parameters"].to<ArduinoJson::JsonObject>();
+        p["type"] = "object";
+        p["properties"].to<ArduinoJson::JsonObject>();  // required empty object
+    }
+    {   // set_volume
+        auto t = tools.add<ArduinoJson::JsonObject>();
+        t["type"] = "function";
+        t["name"] = "set_volume";
+        t["description"] = "Set the speaker volume (0-100).";
+        auto p = t["parameters"].to<ArduinoJson::JsonObject>();
+        p["type"] = "object";
+        p["properties"]["volume"]["type"] = "integer";
+        p["required"].add("volume");
+    }
+    {   // get_battery
+        auto t = tools.add<ArduinoJson::JsonObject>();
+        t["type"] = "function";
+        t["name"] = "get_battery";
+        t["description"] = "Get current battery level (0-100%) and charging status.";
+        auto p = t["parameters"].to<ArduinoJson::JsonObject>();
+        p["type"] = "object";
+        p["properties"].to<ArduinoJson::JsonObject>();  // required empty object
+    }
+
     _send_json(ctx, doc);
     ESP_LOGI(_tag, "session.update sent");
+}
+
+static void _execute_tool(OpenAiContext& ctx, const PendingToolCall& call)
+{
+    ESP_LOGI(_tag, "tool call: %s args=%s", call.name.c_str(), call.args.c_str());
+
+    std::string result = R"({"success":true})";
+
+    ArduinoJson::JsonDocument args;
+    bool args_ok = ArduinoJson::deserializeJson(args, call.args) == ArduinoJson::DeserializationError::Ok;
+
+    if (call.name == "set_led_color") {
+        int r = args_ok ? (int)(args["red"]   | 0) : 0;
+        int g = args_ok ? (int)(args["green"] | 0) : 0;
+        int b = args_ok ? (int)(args["blue"]  | 0) : 0;
+        LvglLockGuard lock;
+        GetStackChan().leftNeonLight().setColor(r, g, b);
+        GetStackChan().rightNeonLight().setColor(r, g, b);
+
+    } else if (call.name == "set_head_angles") {
+        int yaw   = args_ok ? (int)(args["yaw"]   | 0)   : 0;
+        int pitch = args_ok ? (int)(args["pitch"] | 0)   : 0;
+        int speed = args_ok ? (int)(args["speed"] | 150) : 150;
+        LvglLockGuard lock;
+        auto& motion = GetStackChan().motion();
+        motion.yawServo().moveWithSpeed(yaw * 10, speed);
+        motion.pitchServo().moveWithSpeed(pitch * 10, speed);
+
+    } else if (call.name == "get_head_angles") {
+        LvglLockGuard lock;
+        auto& motion = GetStackChan().motion();
+        int yaw   = motion.yawServo().getCurrentAngle()   / 10;
+        int pitch = motion.pitchServo().getCurrentAngle() / 10;
+        char buf[48];
+        snprintf(buf, sizeof(buf), R"({"yaw":%d,"pitch":%d})", yaw, pitch);
+        result = buf;
+
+    } else if (call.name == "set_volume") {
+        int vol = args_ok ? (int)(args["volume"] | 70) : 70;
+        GetHAL().setSpeakerVolume(static_cast<uint8_t>(vol));
+
+    } else if (call.name == "get_battery") {
+        int level = 0;
+        bool charging = false, discharging = false;
+        Board::GetInstance().GetBatteryLevel(level, charging, discharging);
+        char buf[64];
+        snprintf(buf, sizeof(buf), R"({"level":%d,"charging":%s,"discharging":%s})",
+                 level, charging ? "true" : "false", discharging ? "true" : "false");
+        result = buf;
+
+    } else {
+        ESP_LOGW(_tag, "unknown tool: %s", call.name.c_str());
+        result = R"({"error":"unknown tool"})";
+    }
+
+    // Send function_call_output
+    {
+        ArduinoJson::JsonDocument resp;
+        resp["type"] = "conversation.item.create";
+        auto item = resp["item"].to<ArduinoJson::JsonObject>();
+        item["type"]    = "function_call_output";
+        item["call_id"] = call.call_id;
+        item["output"]  = result;
+        _send_json(ctx, resp);
+    }
+    // Ask the model to continue
+    {
+        ArduinoJson::JsonDocument cont;
+        cont["type"] = "response.create";
+        _send_json(ctx, cont);
+    }
+    ESP_LOGI(_tag, "tool result sent: %s", result.c_str());
 }
 
 static void _handle_message(OpenAiContext& ctx, const std::string& payload)
@@ -154,6 +291,27 @@ static void _handle_message(OpenAiContext& ctx, const std::string& payload)
 
     } else if (strcmp(type, "response.created") == 0) {
         ESP_LOGI(_tag, "response started");
+
+    } else if (strcmp(type, "response.output_item.added") == 0) {
+        const char* item_type = doc["item"]["type"] | "";
+        if (strcmp(item_type, "function_call") == 0) {
+            ctx.pending_tool.call_id = doc["item"]["call_id"] | "";
+            ctx.pending_tool.name    = doc["item"]["name"]    | "";
+            ctx.pending_tool.args    = "";
+            ctx.has_pending_tool     = true;
+            ESP_LOGI(_tag, "tool call start: %s (%s)", ctx.pending_tool.name.c_str(), ctx.pending_tool.call_id.c_str());
+        }
+
+    } else if (strcmp(type, "response.function_call_arguments.delta") == 0) {
+        if (ctx.has_pending_tool) {
+            ctx.pending_tool.args += doc["delta"] | "";
+        }
+
+    } else if (strcmp(type, "response.function_call_arguments.done") == 0) {
+        if (ctx.has_pending_tool) {
+            ctx.has_pending_tool = false;
+            _execute_tool(ctx, ctx.pending_tool);
+        }
 
     } else if (strcmp(type, "response.output_audio.delta") == 0) {
         const char* audio_b64 = doc["delta"] | "";
@@ -336,8 +494,15 @@ static void _openai_ws_task(void* param)
 
     bool connected = true;
     uint32_t last_reconnect = 0;
+    uint32_t loop_count = 0;
     while (true) {
         vTaskDelay(pdMS_TO_TICKS(20));
+        loop_count++;
+
+        // Heartbeat: confirm this loop is running (every ~10 s)
+        if (loop_count % 500 == 1) {
+            ESP_LOGI(_tag, "WS loop alive (press PWR to toggle)");
+        }
 
         // PWR button: toggle connection on/off
         if (Board::GetInstance().IsPowerButtonPressed()) {
