@@ -32,6 +32,7 @@
 #include <freertos/task.h>
 #include <freertos/semphr.h>
 #include <esp_log.h>
+#include <esp_system.h>
 #include <cstring>
 
 static const char* _tag = "OpenAI-WS";
@@ -494,28 +495,50 @@ static void _openai_ws_task(void* param)
 
     bool connected = true;
     uint32_t last_reconnect = 0;
+    // Double-press detection: 1st press is "pending" until either a 2nd press arrives
+    // within kDoublePressWindowMs (→ go home / reboot) or the window elapses (→ toggle WS).
+    constexpr uint32_t kDoublePressWindowMs = 500;
+    bool press_pending = false;
+    uint32_t first_press_ms = 0;
+
+    auto toggle_connection = [&]() {
+        if (connected) {
+            ESP_LOGI(_tag, "PWR single-press: disconnecting");
+            connected = false;
+            ctx.session_ready = false;
+            xSemaphoreTake(ctx.ws_mutex, portMAX_DELAY);
+            ctx.ws.reset();
+            xSemaphoreGive(ctx.ws_mutex);
+            _set_status_led(false);
+        } else {
+            ESP_LOGI(_tag, "PWR single-press: reconnecting");
+            connected = true;
+            last_reconnect = 0;
+        }
+    };
+
     while (true) {
         vTaskDelay(pdMS_TO_TICKS(20));
+        const uint32_t now = xTaskGetTickCount() * portTICK_PERIOD_MS;
 
-        // PWR button: toggle connection on/off
         if (Board::GetInstance().IsPowerButtonPressed()) {
-            if (connected) {
-                ESP_LOGI(_tag, "PWR button: disconnecting");
-                connected = false;
-                ctx.session_ready = false;
-                xSemaphoreTake(ctx.ws_mutex, portMAX_DELAY);
-                ctx.ws.reset();
-                xSemaphoreGive(ctx.ws_mutex);
-                _set_status_led(false);
+            if (press_pending && (now - first_press_ms) < kDoublePressWindowMs) {
+                ESP_LOGI(_tag, "PWR double-press: rebooting to launcher");
+                vTaskDelay(pdMS_TO_TICKS(50));  // let log flush
+                esp_restart();
             } else {
-                ESP_LOGI(_tag, "PWR button: reconnecting");
-                connected = true;
-                last_reconnect = 0;  // trigger immediate reconnect below
+                press_pending = true;
+                first_press_ms = now;
             }
         }
 
+        // Single-press fires after the double-press window expires.
+        if (press_pending && (now - first_press_ms) >= kDoublePressWindowMs) {
+            press_pending = false;
+            toggle_connection();
+        }
+
         if (connected && (!ctx.ws || !ctx.ws->IsConnected())) {
-            uint32_t now = xTaskGetTickCount() * portTICK_PERIOD_MS;
             if (now - last_reconnect > 5000) {
                 last_reconnect = now;
                 ESP_LOGI(_tag, "Reconnecting...");
