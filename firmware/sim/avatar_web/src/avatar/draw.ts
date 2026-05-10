@@ -30,20 +30,20 @@ function drawEye(
   const eyeSize = mapRange(feature.size, -100, 100, 8, 32);
   const visibleRatio = blinkClosed ? 0.12 : Math.max(0.08, Math.min(1, feature.weight / 100));
   const radius = eyeSize / 2;
-  const eyelidOffsetY = -eyeSize * visibleRatio;
+  const visibleHeight = eyeSize * visibleRatio;
+  const clipTop = radius - visibleHeight;
 
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate((feature.rotation / 10) * (Math.PI / 180));
 
+  ctx.beginPath();
+  ctx.rect(-radius - 1, clipTop, eyeSize + 2, visibleHeight + 1);
+  ctx.clip();
+
   ctx.fillStyle = "#ffffff";
   ctx.beginPath();
   ctx.arc(0, 0, radius, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.fillStyle = "#000000";
-  ctx.beginPath();
-  ctx.arc(0, eyelidOffsetY, radius, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.restore();
