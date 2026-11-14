@@ -52,3 +52,32 @@ underruns. This checks flash recovery, not factory cloud or motor operation.
 
 Integrated device memory, audio, mouth animation, cancel and re-entry validation
 remain the next checkpoint. Keep this note proposed until those results exist.
+
+## First boot and contiguous SRAM
+
+Candidate 1 was written and every image verified. It failed before HAL startup:
+239,948 contiguous bytes were required, with 296,439 internal bytes free but a
+largest block of 167,936. Its private boot log is retained under
+`firmware/build-local-ito/device-tests/sessions/20261114T222616.498049Z/`.
+USB reset, default reset and no-reset connection attempts could not reach ROM
+while it rebooted. A physical RST download-mode reset was requested.
+
+The hot arena is reserved by an IDF CORE priority-106 initialization hook.
+Heap, libc and PSRAM are initialized at that point. C++ constructors and the
+DMA pool have not split the largest block. The private startup API is tied to
+the pinned IDF 5.5.4. The local DMA reserve is 32 KB, matching the tested native
+Ito configuration. Heap and non-ISR ring-buffer code use flash. ISR ring-buffer
+functions remain in IRAM. The active local ISR paths do not allocate with the
+cache disabled.
+
+The local LCD transfer buffer holds eight rows, preserving the original image.
+Unused servo state is excluded, the USB-only console allocates no UART0 driver,
+and its 4 KB text buffer uses external BSS. Engine arithmetic and the measured
+239,948-byte hot arena are unchanged. Reducing the synthesis arena or moving it
+to PSRAM was rejected for this checkpoint.
+
+The corrected build passes. Static DIRAM use is 108,179 bytes, compared with
+135,375 bytes in candidate 1. Initialization failures remain in an error/idle
+state instead of restarting repeatedly. Runtime memory and speech validation
+remain pending download-mode recovery. The corrected candidate is an app-only
+update because candidate 1's layout, model and assets are verified.

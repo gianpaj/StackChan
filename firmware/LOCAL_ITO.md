@@ -18,8 +18,9 @@ python3 fetch_repos.py
 `repos.json` pins the Ito source. `dependencies.ito.lock` pins the local profile's
 registry components; `dependencies.lock` belongs to the normal build.
 The local build uses `sdkconfig.ito`, `sdkconfig.ito.defaults`,
-`partitions.ito.csv` and `build-local-ito/`. The hot arena must fit in internal
-SRAM. The frontend's static buffers use PSRAM.
+`partitions.ito.csv` and `build-local-ito/`. The hot arena is reserved before C++ startup and must fit in internal SRAM.
+The frontend and console text buffers use PSRAM. The local display uses an
+eight-row DMA transfer buffer.
 
 The approved model is `ito_female_esp32s3_int4.bin`, 3,196,096 bytes, SHA256
 `155da4f3c58266ab49c0b885caff08d02d72be5635d5bc960c86ed055d529b27`.

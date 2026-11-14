@@ -55,7 +55,10 @@ void stackchan_start_local_ito()
         }
     };
     config.start_console = true;
-    ESP_ERROR_CHECK(itofs_service_start(&config));
+    const auto error = itofs_service_start(&config);
+    if (error != ESP_OK) {
+        ESP_LOGE(tag, "Speech startup failed: %s; remaining in the avatar screen", esp_err_to_name(error));
+    }
     for (;;) {
         GetHAL().feedTheDog();
         {

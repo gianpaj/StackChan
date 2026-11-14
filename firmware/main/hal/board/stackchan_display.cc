@@ -131,7 +131,11 @@ StackChanAvatarDisplay::StackChanAvatarDisplay(esp_lcd_panel_io_handle_t panel_i
         .io_handle      = panel_io_,
         .panel_handle   = panel_,
         .control_handle = nullptr,
+#if CONFIG_STACKCHAN_LOCAL_ITO
+        .buffer_size    = static_cast<uint32_t>(width_ * 8),
+#else
         .buffer_size    = static_cast<uint32_t>(width_ * 20),
+#endif
         .double_buffer  = false,
         .trans_size     = 0,
         .hres           = static_cast<uint32_t>(width_),

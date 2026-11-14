@@ -20,7 +20,7 @@ set(STACK_CHAN_INCLUDE_DIRS
 )
 list(APPEND STACK_CHAN_SOURCES main.cpp)
 if(CONFIG_STACKCHAN_LOCAL_ITO)
-    list(FILTER STACK_CHAN_SOURCES EXCLUDE REGEX "hal/hal_ble\\.cpp$|hal/utils/bleprph/")
+    list(FILTER STACK_CHAN_SOURCES EXCLUDE REGEX "hal/hal_(ble|servo)\\.cpp$|hal/utils/bleprph/")
     list(APPEND STACK_CHAN_SOURCES local_ito.cpp)
 endif()
 
