@@ -7,6 +7,7 @@
 #include <memory>
 #include <mooncake_log.h>
 #include <nvs_flash.h>
+#include <stackchan/stackchan.h>
 
 static std::unique_ptr<Hal> _hal_instance;
 static const std::string_view _tag = "HAL";
@@ -26,19 +27,37 @@ void Hal::init()
 
     // Initialize NVS
     esp_err_t ret = nvs_flash_init();
+#if !CONFIG_STACKCHAN_LOCAL_ITO
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
         ret = nvs_flash_init();
     }
+#endif
     ESP_ERROR_CHECK(ret);
 
     xiaozhi_board_init();
+#if !CONFIG_STACKCHAN_LOCAL_ITO
     xiaozhi_mcp_init();
+#endif
     head_touch_init();
     io_expander_init();
     rtc_init();
     imu_init();
+#if CONFIG_STACKCHAN_LOCAL_ITO
+    // Keep menu actions safe without a servo bus or motor power.
+    class LocalServo : public stackchan::motion::Servo {
+    public:
+        LocalServo() { set_angle_limit({-1800, 1800}); }
+    private:
+        void set_angle_impl(int) override {}
+    };
+    auto motion = std::make_unique<stackchan::motion::Motion>(
+        std::make_unique<LocalServo>(), std::make_unique<LocalServo>());
+    motion->init();
+    GetStackChan().attachMotion(std::move(motion));
+#else
     servo_init();
+#endif
     lvgl_init();
 }
 
@@ -178,6 +197,11 @@ static void _stackchan_update_task(void* param)
 
 void Hal::startXiaozhi()
 {
+#if CONFIG_STACKCHAN_LOCAL_ITO
+    extern void stackchan_start_local_ito();
+    stackchan_start_local_ito();
+    return;
+#endif
     mclog::tagInfo(_tag, "start xiaozhi");
 
     auto& motion = GetStackChan().motion();

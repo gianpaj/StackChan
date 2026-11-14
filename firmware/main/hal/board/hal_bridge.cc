@@ -111,12 +111,14 @@ void xiaozhi_board_init()
 
 void start_xiaozhi_app()
 {
+#if !CONFIG_STACKCHAN_LOCAL_ITO
     set_xiaozhi_mode(true);
 
     // Initialize and run the application
     auto& app = Application::GetInstance();
     app.Initialize();
     app.Run();  // This function runs the main event loop and never returns
+#endif
 }
 
 XiaozhiConfig_t get_xiaozhi_config()
@@ -147,8 +149,10 @@ void set_xiaozhi_config(const XiaozhiConfig_t& config)
 
 void app_play_sound(const std::string_view& sound)
 {
+#if !CONFIG_STACKCHAN_LOCAL_ITO
     auto& app = Application::GetInstance();
     app.PlaySound(sound);
+#endif
 }
 
 }  // namespace hal_bridge

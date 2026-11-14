@@ -10,6 +10,13 @@
 #include <apps/apps.h>
 #include <hal/hal.h>
 
+#ifdef CONFIG_STACKCHAN_LOCAL_ITO
+#include "itofs_service.h"
+#include "esp_check.h"
+#include "esp_heap_caps.h"
+#include "esp_log.h"
+#endif
+
 using namespace mooncake;
 using namespace smooth_ui_toolkit;
 
@@ -19,6 +26,13 @@ extern "C" void app_main(void)
     mclog::set_level(mclog::level_info);
     mclog::set_time_format(mclog::time_format_unix_milliseconds);
 
+#ifdef CONFIG_STACKCHAN_LOCAL_ITO
+    ESP_LOGI("local_ito", "before hot reserve: internal free=%u largest=%u",
+             unsigned(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
+             unsigned(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)));
+    ESP_ERROR_CHECK(itofs_service_reserve_hot(239948));
+#endif
+
     // HAL init
     GetHAL().init();
 
@@ -27,7 +41,11 @@ extern "C" void app_main(void)
     ui_hal::on_get_tick([]() { return GetHAL().millis(); });
 
     const bool skip_mooncake =
+#ifdef CONFIG_STACKCHAN_LOCAL_ITO
+        GetHAL().getWarmRebootTarget() < 0;
+#else
         GetHAL().getXiaozhiConfig().startAiAgentOnBoot && GetHAL().getWarmRebootTarget() < 0;
+#endif
 
     if (!skip_mooncake) {
         // Install apps

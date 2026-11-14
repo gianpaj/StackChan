@@ -34,5 +34,11 @@
         "url": "https://github.com/espressif/esp-now.git",
         "path": "components/esp-now",
         "ref": "c33383de97f3ed2fc52117f5ef04f71990432e5d"
+    },
+    {
+        "url": "https://github.com/gianpaj/ito.git",
+        "path": "ito",
+        "ref": "5b14775707d2f4ffbb6819ae6a2eb3dcbb2bed95",
+        "version": "local StackChan runtime"
     }
 ]

@@ -63,6 +63,9 @@ void Hal::setServoPowerEnabled(bool enabled)
     if (!_io_expander) {
         return;
     }
+#if CONFIG_STACKCHAN_LOCAL_ITO
+    enabled = false;
+#endif
     _io_expander->digitalWrite(0, enabled ? true : false);
 }
 

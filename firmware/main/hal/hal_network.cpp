@@ -45,6 +45,10 @@ void Hal::startSntp()
 
 void Hal::startNetwork(std::function<void(std::string_view)> onLog)
 {
+#if CONFIG_STACKCHAN_LOCAL_ITO
+    if (onLog) onLog("Networking is unavailable in local speech mode.");
+    return;
+#else
     // A network diagnostic may already have connected saved Wi-Fi. Starting
     // the active station again emits no new Connected event, so reuse it.
     if (WifiManager::GetInstance().IsConnected()) {
@@ -123,6 +127,7 @@ void Hal::startNetwork(std::function<void(std::string_view)> onLog)
     board.SetNetworkEventCallback(nullptr);
 
     startSntp();
+#endif
 }
 
 WifiStatus Hal::getWifiStatus()

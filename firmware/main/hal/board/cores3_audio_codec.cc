@@ -9,7 +9,11 @@
 CoreS3AudioCodec::CoreS3AudioCodec(void* i2c_master_handle, int input_sample_rate, int output_sample_rate,
     gpio_num_t mclk, gpio_num_t bclk, gpio_num_t ws, gpio_num_t dout, gpio_num_t din,
     uint8_t aw88298_addr, uint8_t es7210_addr, bool input_reference) {
+#if CONFIG_STACKCHAN_LOCAL_ITO
+    duplex_ = false;
+#else
     duplex_ = true; // 是否双工
+#endif
     input_reference_ = input_reference; // 是否使用参考输入，实现回声消除
     input_channels_ = input_reference_ ? 2 : 1; // 输入通道数
     input_sample_rate_ = input_sample_rate;
@@ -57,6 +61,7 @@ CoreS3AudioCodec::CoreS3AudioCodec(void* i2c_master_handle, int input_sample_rat
     output_dev_ = esp_codec_dev_new(&dev_cfg);
     assert(output_dev_ != NULL);
 
+#if !CONFIG_STACKCHAN_LOCAL_ITO
     // Audio Input(Microphone)
     i2c_cfg.addr = es7210_addr;
     in_ctrl_if_ = audio_codec_new_i2c_ctrl(&i2c_cfg);
@@ -73,17 +78,20 @@ CoreS3AudioCodec::CoreS3AudioCodec(void* i2c_master_handle, int input_sample_rat
     input_dev_ = esp_codec_dev_new(&dev_cfg);
     assert(input_dev_ != NULL);
 
+#endif
     ESP_LOGI(TAG, "CoreS3AudioCodec initialized");
 }
 
 CoreS3AudioCodec::~CoreS3AudioCodec() {
     ESP_ERROR_CHECK(esp_codec_dev_close(output_dev_));
     esp_codec_dev_delete(output_dev_);
-    ESP_ERROR_CHECK(esp_codec_dev_close(input_dev_));
-    esp_codec_dev_delete(input_dev_);
+    if (input_dev_) {
+        ESP_ERROR_CHECK(esp_codec_dev_close(input_dev_));
+        esp_codec_dev_delete(input_dev_);
+    }
 
-    audio_codec_delete_codec_if(in_codec_if_);
-    audio_codec_delete_ctrl_if(in_ctrl_if_);
+    if (in_codec_if_) audio_codec_delete_codec_if(in_codec_if_);
+    if (in_ctrl_if_) audio_codec_delete_ctrl_if(in_ctrl_if_);
     audio_codec_delete_codec_if(out_codec_if_);
     audio_codec_delete_ctrl_if(out_ctrl_if_);
     audio_codec_delete_gpio_if(gpio_if_);
@@ -104,7 +112,11 @@ void CoreS3AudioCodec::CreateDuplexChannels(gpio_num_t mclk, gpio_num_t bclk, gp
         .auto_clear_before_cb = false,
         .intr_priority = 0,
     };
+#if CONFIG_STACKCHAN_LOCAL_ITO
+    ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, &tx_handle_, nullptr));
+#else
     ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, &tx_handle_, &rx_handle_));
+#endif
 
     i2s_std_config_t std_cfg = {
         .clk_cfg = {
@@ -139,6 +151,7 @@ void CoreS3AudioCodec::CreateDuplexChannels(gpio_num_t mclk, gpio_num_t bclk, gp
         }
     };
 
+#if !CONFIG_STACKCHAN_LOCAL_ITO
     i2s_tdm_config_t tdm_cfg = {
         .clk_cfg = {
             .sample_rate_hz = (uint32_t)input_sample_rate_,
@@ -175,10 +188,15 @@ void CoreS3AudioCodec::CreateDuplexChannels(gpio_num_t mclk, gpio_num_t bclk, gp
         }
     };
 
+#endif
     ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_handle_, &std_cfg));
+#if !CONFIG_STACKCHAN_LOCAL_ITO
     ESP_ERROR_CHECK(i2s_channel_init_tdm_mode(rx_handle_, &tdm_cfg));
+#endif
     ESP_ERROR_CHECK(i2s_channel_enable(tx_handle_));
+#if !CONFIG_STACKCHAN_LOCAL_ITO
     ESP_ERROR_CHECK(i2s_channel_enable(rx_handle_));
+#endif
     ESP_LOGI(TAG, "Duplex channels created");
 }
 
@@ -188,6 +206,9 @@ void CoreS3AudioCodec::SetOutputVolume(int volume) {
 }
 
 void CoreS3AudioCodec::EnableInput(bool enable) {
+#if CONFIG_STACKCHAN_LOCAL_ITO
+    return;
+#endif
     if (enable == input_enabled_) {
         return;
     }
@@ -211,6 +232,9 @@ void CoreS3AudioCodec::EnableInput(bool enable) {
 }
 
 void CoreS3AudioCodec::EnableOutput(bool enable) {
+#if CONFIG_STACKCHAN_LOCAL_ITO
+    return;
+#endif
     if (enable == output_enabled_) {
         return;
     }
@@ -232,6 +256,9 @@ void CoreS3AudioCodec::EnableOutput(bool enable) {
 }
 
 int CoreS3AudioCodec::Read(int16_t* dest, int samples) {
+#if CONFIG_STACKCHAN_LOCAL_ITO
+    return 0;
+#endif
     if (input_enabled_) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_read(input_dev_, (void*)dest, samples * sizeof(int16_t)));
     }
@@ -239,8 +266,128 @@ int CoreS3AudioCodec::Read(int16_t* dest, int samples) {
 }
 
 int CoreS3AudioCodec::Write(const int16_t* data, int samples) {
+#if CONFIG_STACKCHAN_LOCAL_ITO
+    return 0;
+#endif
     if (output_enabled_) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_write(output_dev_, (void*)data, samples * sizeof(int16_t)));
     }
     return samples;
 }
+
+#if CONFIG_STACKCHAN_LOCAL_ITO
+#include <esp_timer.h>
+#include <algorithm>
+
+bool CoreS3AudioCodec::LocalOpen(int sample_rate)
+{
+    if (sample_rate != output_sample_rate_) {
+        return false;
+    }
+    if (output_enabled_) {
+        return true;
+    }
+    Start();
+    esp_codec_dev_sample_info_t fs = {};
+    fs.bits_per_sample = 16;
+    fs.channel = 1;
+    fs.sample_rate = sample_rate;
+    if (esp_codec_dev_open(output_dev_, &fs) != ESP_CODEC_DEV_OK) {
+        return false;
+    }
+    AudioCodec::EnableOutput(true);
+    if (!LocalSetVolume(output_volume_)) {
+        return false;
+    }
+    return LocalFlush();
+}
+
+bool CoreS3AudioCodec::LocalWrite(const int16_t* data, size_t samples)
+{
+    if (!output_enabled_ || !data || samples == 0 || samples > AUDIO_CODEC_DMA_FRAME_NUM) {
+        return false;
+    }
+    size_t bytes_written = 0;
+    const size_t bytes = samples * sizeof(int16_t);
+    const esp_err_t result = i2s_channel_write(tx_handle_, data, bytes, &bytes_written, 40);
+    if (result != ESP_OK || bytes_written != bytes) {
+        ESP_LOGE(TAG, "Local PCM write failed: %s, %u/%u bytes", esp_err_to_name(result),
+                 static_cast<unsigned>(bytes_written), static_cast<unsigned>(bytes));
+        return false;
+    }
+    i2s_chan_info_t info = {};
+    if (i2s_channel_get_info(tx_handle_, &info) != ESP_OK) {
+        return false;
+    }
+    // One full ring plus one frame covers every sample accepted by the driver.
+    local_pending_until_us_ = esp_timer_get_time() +
+        (info.total_dma_buf_size * 1000000LL / (output_sample_rate_ * sizeof(int16_t))) +
+        (AUDIO_CODEC_DMA_FRAME_NUM * 1000000LL / output_sample_rate_);
+    return true;
+}
+
+bool CoreS3AudioCodec::LocalMute(bool muted)
+{
+    if (!output_enabled_ || !out_codec_if_->mute ||
+        out_codec_if_->mute(out_codec_if_, muted || output_volume_ == 0) != ESP_CODEC_DEV_OK) {
+        return false;
+    }
+    local_muted_ = muted;
+    return true;
+}
+
+bool CoreS3AudioCodec::LocalFlush()
+{
+    if (!output_enabled_) {
+        return false;
+    }
+    const bool restore_mute = local_muted_;
+    if (!LocalMute(true)) {
+        return false;
+    }
+    if (i2s_channel_disable(tx_handle_) != ESP_OK) {
+        return false;
+    }
+    i2s_chan_info_t info = {};
+    if (i2s_channel_get_info(tx_handle_, &info) != ESP_OK || info.total_dma_buf_size == 0) {
+        return false;
+    }
+    static const int16_t silence[AUDIO_CODEC_DMA_FRAME_NUM] = {};
+    size_t remaining = info.total_dma_buf_size;
+    while (remaining > 0) {
+        const size_t chunk = std::min(remaining, sizeof(silence));
+        size_t loaded = 0;
+        if (i2s_channel_preload_data(tx_handle_, silence, chunk, &loaded) != ESP_OK || loaded != chunk) {
+            return false;
+        }
+        remaining -= loaded;
+    }
+    if (i2s_channel_enable(tx_handle_) != ESP_OK) {
+        return false;
+    }
+    local_pending_until_us_ = 0;
+    return LocalMute(restore_mute);
+}
+
+bool CoreS3AudioCodec::LocalPlaying() const
+{
+    return output_enabled_ && esp_timer_get_time() < local_pending_until_us_;
+}
+
+bool CoreS3AudioCodec::LocalSetVolume(int volume)
+{
+    if (volume < 0 || volume > 100 || !out_codec_if_->set_vol || !out_codec_if_->mute) {
+        return false;
+    }
+    if (volume == 0 && out_codec_if_->mute(out_codec_if_, true) != ESP_CODEC_DEV_OK) {
+        return false;
+    }
+    // Match esp_codec_dev's default percent-to-decibel curve.
+    const float db = volume == 0 ? -96.0f : -50.0f + volume * 0.5f;
+    if (out_codec_if_->set_vol(out_codec_if_, db) != ESP_CODEC_DEV_OK) {
+        return false;
+    }
+    output_volume_ = volume;
+    return LocalMute(local_muted_);
+}
+#endif

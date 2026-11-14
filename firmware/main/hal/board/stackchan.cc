@@ -98,12 +98,12 @@ public:
     {
         uint8_t data = ReadReg(0x90);
         data |= 0b10110100;
-        WriteReg(0x90, data);
+        WritePowerEnable(data);
         // WriteReg(0x99, (0b11110 - 5));
         WriteReg(0x97, (0b11110 - 2));
         WriteReg(0x69, 0b00110101);
         WriteReg(0x30, 0b111111);
-        WriteReg(0x90, 0xBF);
+        WritePowerEnable(0xBF);
         WriteReg(0x94, 33 - 5);
         WriteReg(0x95, 33 - 5);
         WriteReg(0x27, 0x00);
@@ -118,12 +118,26 @@ public:
         SetBrightness(0);
     }
 
+    void WritePowerEnable(uint8_t value)
+    {
+#if CONFIG_STACKCHAN_LOCAL_ITO
+        // ALDO2 supplies the microphones. Every rail update keeps it off.
+        value &= ~0x02;
+#endif
+        WriteReg(0x90, value);
+#if CONFIG_STACKCHAN_LOCAL_ITO
+        uint8_t readback = 0;
+        ESP_ERROR_CHECK(TryReadRegs(0x90, &readback, sizeof(readback)));
+        ESP_ERROR_CHECK(readback == value ? ESP_OK : ESP_ERR_INVALID_STATE);
+#endif
+    }
+
     void SetBrightness(uint8_t brightness)
     {
         if (brightness == 0) {
             // DLDO1 off
             uint8_t val = ReadReg(0x90);
-            WriteReg(0x90, val & 0x7F);
+            WritePowerEnable(val & 0x7F);
         } else {
             // 映射计算：将 1~100 映射到 寄存器值 20~28
             // 公式：MinReg + (input * (MaxReg - MinReg) / MaxInput)
@@ -137,7 +151,7 @@ public:
             // Make sure DLDO1 on
             uint8_t val = ReadReg(0x90);
             if (!(val & 0x80)) {
-                WriteReg(0x90, val | 0x80);
+                WritePowerEnable(val | 0x80);
             }
         }
     }
@@ -337,7 +351,13 @@ private:
     uint32_t consecutive_failures_ = 0;
 };
 
-class M5StackCoreS3Board : public WifiBoard {
+#if CONFIG_STACKCHAN_LOCAL_ITO
+using StackChanBoardBase = Board;
+#else
+using StackChanBoardBase = WifiBoard;
+#endif
+
+class M5StackCoreS3Board : public StackChanBoardBase {
 private:
     static constexpr int kPowerSaveSleepDelaySeconds  = 300;
     static constexpr int kPowerStatePollIntervalMs    = 1000;
@@ -357,9 +377,9 @@ private:
     Aw9523* aw9523_;
     Ft6336* ft6336_;
     LvglDisplay* display_;
-    StackChanCamera* camera_;
+    StackChanCamera* camera_ = nullptr;
     esp_timer_handle_t touchpad_timer_;
-    PowerSaveTimer* power_save_timer_;
+    PowerSaveTimer* power_save_timer_ = nullptr;
     hal_bridge::XiaozhiConfig_t xiaozhi_config_;
     std::mutex power_state_mutex_;
     PowerState power_state_;
@@ -370,11 +390,16 @@ private:
 
     bool ShouldEnablePowerSave(bool has_external_power, bool is_discharging) const
     {
+#if CONFIG_STACKCHAN_LOCAL_ITO
+        return false;
+#else
         return is_discharging || (has_external_power && xiaozhi_config_.allowShutdownWhenCharging);
+#endif
     }
 
     void UpdatePowerSaveEnabled(bool has_external_power, bool is_discharging)
     {
+#if !CONFIG_STACKCHAN_LOCAL_ITO
         const bool should_enable_power_save = ShouldEnablePowerSave(has_external_power, is_discharging);
         if (should_enable_power_save == last_power_save_enabled_) {
             return;
@@ -385,6 +410,7 @@ private:
                  xiaozhi_config_.allowShutdownWhenCharging);
         power_save_timer_->SetEnabled(should_enable_power_save);
         last_power_save_enabled_ = should_enable_power_save;
+#endif
     }
 
     void RefreshPowerState()
@@ -679,17 +705,31 @@ public:
     {
         InitializeI2c();
         InitializeAxp2101();
+#if CONFIG_STACKCHAN_LOCAL_ITO
+        RefreshPowerState();
+#else
         InitializePowerSaveTimer();
+#endif
         InitializeAw9523();
         I2cDetect();
         InitializeFt6336();
         InitializeSpi();
         InitializeIli9342Display();
+#if !CONFIG_STACKCHAN_LOCAL_ITO
         InitializeCamera();
+#endif
         StartTouchpadTimer();
         GetBacklight()->RestoreBrightness();
     }
 
+#if CONFIG_STACKCHAN_LOCAL_ITO
+    std::string GetBoardType() override { return "local-ito"; }
+    NetworkInterface* GetNetwork() override { return nullptr; }
+    void StartNetwork() override {}
+    const char* GetNetworkStateIcon() override { return ""; }
+    std::string GetBoardJson() override { return R"({"type":"local-ito"})"; }
+    std::string GetDeviceStatusJson() override { return R"({"network":{"type":"offline"}})"; }
+#else
     // All fallback paths (no saved SSID, timeout, explicit reconfiguration) use
     // the same BLE App setup flow. Never start the upstream configuration AP.
     void StartWifiConfigMode() override
@@ -697,6 +737,8 @@ public:
         ESP_LOGW(TAG, "WiFi setup required; opening StackChan App setup");
         GetHAL().requestAppSetup();
     }
+
+#endif
 
     virtual AudioCodec* GetAudioCodec() override
     {
@@ -732,10 +774,12 @@ public:
 
     virtual void SetPowerSaveLevel(PowerSaveLevel level) override
     {
+#if !CONFIG_STACKCHAN_LOCAL_ITO
         if (level != PowerSaveLevel::LOW_POWER) {
             power_save_timer_->WakeUp();
         }
         WifiBoard::SetPowerSaveLevel(level);
+#endif
     }
 
     virtual Backlight* GetBacklight() override
@@ -844,10 +888,12 @@ uint8_t hal_bridge::board_get_speaker_volume()
 
 void hal_bridge::toggle_xiaozhi_chat_state()
 {
+#if !CONFIG_STACKCHAN_LOCAL_ITO
     auto& app = Application::GetInstance();
     if (app.GetDeviceState() == kDeviceStateStarting) {
         // EnterWifiConfigMode();
         return;
     }
     app.ToggleChatState();
+#endif
 }

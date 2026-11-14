@@ -15,6 +15,13 @@ using namespace mooncake;
 using namespace view;
 using namespace setup_workers;
 
+#if CONFIG_STACKCHAN_LOCAL_ITO
+static void show_local_mode_unavailable()
+{
+    view::pop_a_toast("Unavailable in local speech mode", view::ToastType::Warning);
+}
+#endif
+
 AppSetup::AppSetup()
 {
     // 配置 App 名
@@ -47,14 +54,22 @@ void AppSetup::onOpen()
             "Wi-Fi",
             {{"Change Wi-Fi",
               [&]() {
+#if CONFIG_STACKCHAN_LOCAL_ITO
+                  show_local_mode_unavailable();
+#else
                   _destroy_menu    = true;
                   _need_warm_reset = true;
                   _worker          = std::make_unique<WifiSetupWorker>();
+#endif
               }},
              {"Testing service",
               [&]() {
+#if CONFIG_STACKCHAN_LOCAL_ITO
+                  show_local_mode_unavailable();
+#else
                   _destroy_menu = true;
                   _worker       = std::make_unique<NetworkTestWorker>();
+#endif
               }}},
         },
         {
@@ -79,28 +94,44 @@ void AppSetup::onOpen()
             "AI.Agent",
             {{"General",
               [&]() {
+#if CONFIG_STACKCHAN_LOCAL_ITO
+                  show_local_mode_unavailable();
+#else
                   _destroy_menu    = true;
                   _need_warm_reset = true;
                   _worker          = std::make_unique<XiaozhiGeneralWorker>();
+#endif
               }},
              {"Power Saving",
               [&]() {
+#if CONFIG_STACKCHAN_LOCAL_ITO
+                  show_local_mode_unavailable();
+#else
                   _destroy_menu    = true;
                   _need_warm_reset = true;
                   _worker          = std::make_unique<XiaozhiPowerSavingWorker>();
+#endif
               }}},
         },
         {
             "Hardware Test",
             {{"Servo",
               [&]() {
+#if CONFIG_STACKCHAN_LOCAL_ITO
+                  show_local_mode_unavailable();
+#else
                   _destroy_menu = true;
                   _worker       = std::make_unique<ZeroCalibrationWorker>();
+#endif
               }},
              {"Microphone",
               [&]() {
+#if CONFIG_STACKCHAN_LOCAL_ITO
+                  show_local_mode_unavailable();
+#else
                   _destroy_menu = true;
                   _worker       = std::make_unique<MicTestWorker>();
+#endif
               }},
              {"RGB Strip",
               [&]() {
@@ -112,9 +143,13 @@ void AppSetup::onOpen()
             "Account",
             {{"Unbind & Reset",
               [&]() {
+#if CONFIG_STACKCHAN_LOCAL_ITO
+                  show_local_mode_unavailable();
+#else
                   _destroy_menu    = true;
                   _need_warm_reset = true;
                   _worker          = std::make_unique<AccountWorker>();
+#endif
               }}},
         },
         {
@@ -131,9 +166,13 @@ void AppSetup::onOpen()
                  }},
                 {"Check for Updates",
                  [&]() {
+#if CONFIG_STACKCHAN_LOCAL_ITO
+                     show_local_mode_unavailable();
+#else
                      _destroy_menu    = true;
                      _need_warm_reset = true;
                      _worker          = std::make_unique<SystemUpdateWorker>();
+#endif
                  }},
                 //  {"Factory Reset",
                 //   [&]() {

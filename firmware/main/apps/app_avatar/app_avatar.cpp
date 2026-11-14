@@ -62,6 +62,9 @@ void AppAvatar::onCreate()
 
 void AppAvatar::onOpen()
 {
+#if CONFIG_STACKCHAN_LOCAL_ITO
+    GetHAL().requestXiaozhiStart();
+#else
     mclog::tagInfo(getAppInfo().name, "on open");
 
     // Create loading page
@@ -225,10 +228,13 @@ void AppAvatar::onOpen()
     /* ----------------------------- Common widgets ----------------------------- */
     view::create_home_indicator([&]() { close(); }, 0xFF9ABC, 0x431525);
     view::create_status_bar(0xFF9ABC, 0x431525);
+#endif
 }
 
 void AppAvatar::onRunning()
 {
+#if CONFIG_STACKCHAN_LOCAL_ITO
+#else
     std::lock_guard<std::mutex> lock(_mutex);
 
     LvglLockGuard lvgl_lock;
@@ -259,10 +265,13 @@ void AppAvatar::onRunning()
 
     view::update_home_indicator();
     view::update_status_bar();
+#endif
 }
 
 void AppAvatar::onClose()
 {
+#if CONFIG_STACKCHAN_LOCAL_ITO
+#else
     mclog::tagInfo(getAppInfo().name, "on close");
 
     {
@@ -286,6 +295,7 @@ void AppAvatar::onClose()
     }
 
     GetHAL().requestWarmReboot(1);
+#endif
 }
 
 void AppAvatar::check_auto_angle_sync_mode()

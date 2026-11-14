@@ -19,6 +19,10 @@ set(STACK_CHAN_INCLUDE_DIRS
     "."
 )
 list(APPEND STACK_CHAN_SOURCES main.cpp)
+if(CONFIG_STACKCHAN_LOCAL_ITO)
+    list(FILTER STACK_CHAN_SOURCES EXCLUDE REGEX "hal/hal_ble\\.cpp$|hal/utils/bleprph/")
+    list(APPEND STACK_CHAN_SOURCES local_ito.cpp)
+endif()
 
 # Define source files
 set(SOURCES "audio/audio_codec.cc"
@@ -320,6 +324,14 @@ idf_component_register(SRCS ${SOURCES}
                         mooncake_log
                         smooth_ui_toolkit
                     )
+
+# CONFIG values are available after IDF's requirement expansion pass.
+if(STACKCHAN_LOCAL_ITO AND NOT CONFIG_STACKCHAN_LOCAL_ITO)
+    message(FATAL_ERROR "Local speech requires CONFIG_STACKCHAN_LOCAL_ITO=y in sdkconfig.ito")
+endif()
+if(CONFIG_STACKCHAN_LOCAL_ITO)
+    target_link_libraries(${COMPONENT_LIB} PRIVATE idf::runtime)
+endif()
 
 # Use target_compile_definitions to define BOARD_TYPE, BOARD_NAME
 # If BOARD_NAME is empty, use BOARD_TYPE

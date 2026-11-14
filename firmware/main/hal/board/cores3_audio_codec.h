@@ -18,6 +18,11 @@ private:
     esp_codec_dev_handle_t output_dev_ = nullptr;
     esp_codec_dev_handle_t input_dev_ = nullptr;
 
+#if CONFIG_STACKCHAN_LOCAL_ITO
+    int64_t local_pending_until_us_ = 0;
+    bool local_muted_ = false;
+#endif
+
     void CreateDuplexChannels(gpio_num_t mclk, gpio_num_t bclk, gpio_num_t ws, gpio_num_t dout, gpio_num_t din);
 
     virtual int Read(int16_t* dest, int samples) override;
@@ -28,6 +33,15 @@ public:
         gpio_num_t mclk, gpio_num_t bclk, gpio_num_t ws, gpio_num_t dout, gpio_num_t din,
         uint8_t aw88298_addr, uint8_t es7210_addr, bool input_reference);
     virtual ~CoreS3AudioCodec();
+
+#if CONFIG_STACKCHAN_LOCAL_ITO
+    bool LocalOpen(int sample_rate);
+    bool LocalWrite(const int16_t* data, size_t samples);
+    bool LocalMute(bool muted);
+    bool LocalFlush();
+    bool LocalPlaying() const;
+    bool LocalSetVolume(int volume);
+#endif
 
     virtual void SetOutputVolume(int volume) override;
     virtual void EnableInput(bool enable) override;

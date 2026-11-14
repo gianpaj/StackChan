@@ -138,7 +138,7 @@ index 7ca7af4..1418901 100644
      ListeningMode GetDefaultListeningMode() const;
      
 diff --git a/main/assets.cc b/main/assets.cc
-index ad61944..6b84daf 100644
+index ad61944..f9648ef 100644
 --- a/main/assets.cc
 +++ b/main/assets.cc
 @@ -3,8 +3,8 @@
@@ -152,7 +152,25 @@ index ad61944..6b84daf 100644
  #if HAVE_LVGL
  #include "display/lcd_display.h"
  #include <spi_flash_mmap.h>
-@@ -356,72 +356,72 @@ bool Assets::LvglStrategy::Apply(Assets* assets) {
+@@ -69,6 +69,9 @@ bool Assets::GetAssetData(const std::string& name, void*& ptr, size_t& size) {
+ }
+ 
+ bool Assets::LoadSrmodelsFromIndex(Assets* assets, cJSON* root) {
++#ifdef CONFIG_STACKCHAN_LOCAL_ITO
++    return false;
++#else
+     void* ptr = nullptr;
+     size_t size = 0;
+     bool need_delete_root = false;
+@@ -116,6 +119,7 @@ bool Assets::LoadSrmodelsFromIndex(Assets* assets, cJSON* root) {
+         cJSON_Delete(root);
+     }
+     return false;
++#endif
+ }
+ 
+ #if HAVE_LVGL
+@@ -356,72 +360,72 @@ bool Assets::LvglStrategy::Apply(Assets* assets) {
  }
  #endif // HAVE_LVGL
  
@@ -355,6 +373,26 @@ index 7ee973c..8de99db 100644
  
      /**
       * WiFi connection timeout callback
+diff --git a/main/display/lvgl_display/lvgl_display.cc b/main/display/lvgl_display/lvgl_display.cc
+index 46668dd..d74759f 100644
+--- a/main/display/lvgl_display/lvgl_display.cc
++++ b/main/display/lvgl_display/lvgl_display.cc
+@@ -111,6 +111,7 @@ void LvglDisplay::ShowNotification(const char* notification, int duration_ms) {
+ }
+ 
+ void LvglDisplay::UpdateStatusBar(bool update_all) {
++#ifndef CONFIG_STACKCHAN_LOCAL_ITO
+     auto& app = Application::GetInstance();
+     auto& board = Board::GetInstance();
+     auto codec = board.GetAudioCodec();
+@@ -216,6 +217,7 @@ void LvglDisplay::UpdateStatusBar(bool update_all) {
+     }
+ 
+     esp_pm_lock_release(pm_lock_);
++#endif
+ }
+ 
+ void LvglDisplay::SetPreviewImage(std::unique_ptr<LvglImage> image) {
 diff --git a/main/ota.cc b/main/ota.cc
 index bcc0dc5..e6792e3 100644
 --- a/main/ota.cc

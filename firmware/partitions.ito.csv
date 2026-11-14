@@ -1,0 +1,10 @@
+# Local Ito profile. Two 4.75 MiB OTA slots, one int4 model, 3 MiB assets.
+# Name, Type, SubType, Offset, Size, Flags
+nvs, data, nvs, 0x9000, 0x6000,
+phy_init, data, phy, 0xf000, 0x1000,
+otadata, data, ota, 0x10000, 0x2000,
+ota_0, app, ota_0, 0x20000, 0x4c0000,
+ota_1, app, ota_1, 0x4e0000, 0x4c0000,
+weights, data, 0x40, 0x9a0000, 0x310000,
+assets, data, spiffs, 0xcb0000, 0x300000,
+coredump, data, coredump, 0xfb0000, 0x10000,

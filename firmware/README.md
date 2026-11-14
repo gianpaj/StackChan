@@ -37,3 +37,8 @@ ctest --test-dir build-host-tests --output-on-failure
 ```bash
 idf.py flash
 ```
+
+### Local speech profile
+
+See [Local Ito speech](LOCAL_ITO.md) for the on-device USB speech build, commands
+and storage layout.
