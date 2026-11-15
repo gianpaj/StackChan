@@ -72,3 +72,8 @@ build-local-ito/
 sdkconfig.ito
 sdkconfig.ito.old
 __pycache__/
+
+oido/
+build-conversation/
+sdkconfig.conversation
+sdkconfig.conversation.old

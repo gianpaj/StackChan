@@ -1,9 +1,18 @@
+config STACKCHAN_CONVERSATION
+    bool "Local Oido recognition and Ito speech through USB"
+    depends on STACKCHAN_LOCAL_ITO
+    default n
+    help
+        Enable bounded microphone capture and local English recognition.
+        Networking and motors remain disabled.
+
 config STACKCHAN_LOCAL_ITO
     bool "Local Ito speech through USB text"
     default n
     help
         Use the original face and codec with on-device Ito speech.
-        This profile keeps motor and microphone power off.
+        Motor power stays off. Microphone power is enabled only during
+        capture in the conversation profile.
 
 menu "StackChan Server"
 

@@ -1,4 +1,12 @@
-# Bounded microphone capture
+# Agent Note: Bounded microphone capture
+
+Status: implemented — Native capture counts and cleanup pass; speech quality is under test.
+
+## Problem
+
+The local speech profile owns I2S for output and keeps the microphone powered
+off. Recording must share the codec without overlapping playback or leaving
+uncertain clocks, resources or power after an error.
 
 ## Decision
 
@@ -31,7 +39,15 @@ The PMIC rail mutex preserves capture power across brightness updates. The rail
 defaults off and each change verifies register readback. Motor power remains
 clamped off. Touch input, menus and native hardware controls are unchanged.
 
-## Verification and limits
+## Alternatives considered
+
+Capturing at 24 kHz and resampling adds a conversion stage when ES7210 supports
+native 16 kHz. The original four-slot TDM path supplies both physical microphones
+and the speaker reference; a single physical microphone is sufficient for this
+half-duplex manual mode. A second codec owner would compete for the same I2S
+controller, so capture stays with the existing owner.
+
+## Consequences
 
 Local and normal ESP-IDF builds pass. Logs are
 `firmware/build-local-ito/oido-capture-build.log` and
@@ -41,7 +57,13 @@ Local and normal ESP-IDF builds pass. Logs are
 methods with mocked I2S, ADC and power calls. ASan/UBSan pass for ownership,
 read bounds, volume-zero mute and 21 injected startup/cleanup failures.
 
-Physical MIC1 routing, capture levels, clipping, power-off readback, recognition
-accuracy and TTS recovery after real capture remain device validation gates.
-Host mocks do not establish those properties. This implementation step performs
-no device or serial access.
+Native capture delivers exactly 16,000 samples in a one-second test and 128,000
+in an eight-second test, with verified cleanup and no clipping. Applying gain
+after ADC enable raises the measured quiet-test peak from about 170 to 4,219.
+Recognition accuracy and spoken recovery are separate acceptance checks.
+
+The manufacturer schematic identifies MIC1 and MIC2 as the physical microphones
+and MIC3 as speaker feedback. Keep the selected MIC1 route when changing the
+capture controller. See the [schematic](https://m5stack-doc.oss-cn-shenzhen.aliyuncs.com/490/Sch_M5_CoreS3_v1.0.pdf).
+Host mocks cannot establish physical signal quality. Private device recordings
+and transcripts stay outside Git.

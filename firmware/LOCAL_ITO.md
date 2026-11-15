@@ -124,4 +124,4 @@ SRAM while stopped. Both regions remain reserved and are separate from free heap
 
 The [original-face baseline](https://github.com/gianpaj/ito/blob/386fc611f91b07fa3fa57a4f8f0aaeb06e2ed652/results/stackchan/2026-11-15-original-face/README.md)
 contains the 196-second paragraph check and compute RTF 1.0352. `degraded=1`
-remains enabled. Microphone/STT and native Tailscale integration are pending.
+remains enabled. The [conversation profile](LOCAL_CONVERSATION.md) adds manual local Oido recognition. Native Tailscale integration is pending.

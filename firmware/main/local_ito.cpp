@@ -2,6 +2,10 @@
 
 #if CONFIG_STACKCHAN_LOCAL_ITO
 #include "itofs_service.h"
+#if CONFIG_STACKCHAN_CONVERSATION
+#include "conversation/controller.h"
+#include "driver/usb_serial_jtag.h"
+#endif
 #include "hal/board/local_ito_board.h"
 #include <hal/hal.h>
 #include <stackchan/stackchan.h>
@@ -18,6 +22,10 @@
 namespace {
 constexpr const char* tag = "local_ito";
 constexpr uint32_t control_stack_bytes = 8192;
+#if CONFIG_STACKCHAN_CONVERSATION
+StackType_t* console_storage = nullptr;
+StaticTask_t console_control;
+#endif
 esp_err_t result(bool ok) { return ok ? ESP_OK : ESP_FAIL; }
 
 void report_control_stack()
@@ -67,6 +75,9 @@ esp_err_t probe_workspace()
 void command(const char* line)
 {
     esp_err_t error = ESP_OK;
+#if CONFIG_STACKCHAN_CONVERSATION
+    if (local_conversation::command(line)) return;
+#endif
     if (!std::strcmp(line, "memory")) {
         report_memory("console");
         report_control_stack();
@@ -98,15 +109,32 @@ void command(const char* line)
 
 void console_task(void*)
 {
+#if CONFIG_STACKCHAN_CONVERSATION
+    // Buffer USB packets while a complete PCM command arrives. Polling one
+    // hardware FIFO per 20 ms limits fixed-audio tests to a few KB per second.
+    usb_serial_jtag_driver_config_t usb_config = {256, 2048};
+    if (!usb_serial_jtag_is_driver_installed() && usb_serial_jtag_driver_install(&usb_config) != ESP_OK) {
+        ESP_LOGE(tag, "Cannot buffer USB input");
+        vTaskDelete(nullptr);
+        return;
+    }
+#endif
     static EXT_RAM_BSS_ATTR char line[4096];
     size_t length = 0;
     bool overflow = false;
     for (;;) {
+#if CONFIG_STACKCHAN_CONVERSATION
+        local_conversation::poll();
+#endif
         uint8_t input[64];
+#if CONFIG_STACKCHAN_CONVERSATION
+        const size_t count = usb_serial_jtag_read_bytes(input, sizeof(input), pdMS_TO_TICKS(20));
+#else
         size_t count = 0;
         while (count < sizeof(input) && usb_serial_jtag_ll_rxfifo_data_available()) {
             count += usb_serial_jtag_ll_read_rxfifo(input + count, sizeof(input) - count);
         }
+#endif
         for (size_t i = 0; i < count; ++i) {
             if (input[i] == '\r' || input[i] == '\n') {
                 line[length] = 0;
@@ -120,10 +148,22 @@ void console_task(void*)
                 overflow = true;
             }
         }
+#if !CONFIG_STACKCHAN_CONVERSATION
         vTaskDelay(pdMS_TO_TICKS(20));
+#endif
     }
 }
 }
+
+#if CONFIG_STACKCHAN_CONVERSATION
+bool stackchan_reserve_local_control_stacks()
+{
+    if (!local_conversation::reserve_worker_stack()) return false;
+    if (!console_storage) console_storage = static_cast<StackType_t*>(
+        heap_caps_malloc(control_stack_bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    return console_storage != nullptr;
+}
+#endif
 
 void stackchan_start_local_ito()
 {
@@ -160,8 +200,16 @@ void stackchan_start_local_ito()
     if (error != ESP_OK) {
         ESP_LOGE(tag, "Speech startup failed: %s; remaining in the avatar screen", esp_err_to_name(error));
     }
+#if CONFIG_STACKCHAN_CONVERSATION
+    if (!local_conversation::start()) ESP_LOGE(tag, "Cannot start conversation controller");
+#endif
     // Resume rebuilds the arena graph on this task. Match the proven boot stack.
+#if CONFIG_STACKCHAN_CONVERSATION
+    if (!console_storage || !xTaskCreateStaticPinnedToCore(console_task, "local_console", control_stack_bytes,
+                                                         nullptr, 4, console_storage, &console_control, 0)) {
+#else
     if (xTaskCreatePinnedToCore(console_task, "local_console", control_stack_bytes, nullptr, 4, nullptr, 0) != pdPASS) {
+#endif
         ESP_LOGE(tag, "Cannot start the USB control task");
     }
     for (;;) {

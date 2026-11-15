@@ -8,10 +8,15 @@ set(PROJECT_VER "1.6.0")
 add_compile_options(-Wno-missing-field-initializers)
 
 option(STACKCHAN_LOCAL_ITO "Build local USB text-to-speech" OFF)
+option(STACKCHAN_CONVERSATION "Build local USB speech recognition and synthesis" OFF)
 if(STACKCHAN_LOCAL_ITO)
     set(SDKCONFIG_DEFAULTS
         "${CMAKE_CURRENT_SOURCE_DIR}/sdkconfig.defaults;${CMAKE_CURRENT_SOURCE_DIR}/sdkconfig.ito.defaults"
         CACHE STRING "Local speech defaults" FORCE)
+    if(STACKCHAN_CONVERSATION)
+        set(SDKCONFIG_DEFAULTS "${SDKCONFIG_DEFAULTS};${CMAKE_CURRENT_SOURCE_DIR}/sdkconfig.conversation.defaults"
+            CACHE STRING "Conversation defaults" FORCE)
+    endif()
 endif()
 
 # Auto-load a local sdkconfig overlay (git-ignored) when present. Lets
@@ -35,12 +40,21 @@ if(STACKCHAN_LOCAL_ITO)
         message(FATAL_ERROR "Run python3 fetch_repos.py to fetch the pinned Ito source")
     endif()
     list(APPEND EXTRA_COMPONENT_DIRS "${ITO_SOURCE}/esp32/runtime" "${ITO_SOURCE}/esp32/frontend")
+    if(STACKCHAN_CONVERSATION)
+        set(PROJECT_VER "1.6.0-conversation")
+        if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/oido/esp32/components/tinyasr/CMakeLists.txt")
+            message(FATAL_ERROR "Run python3 fetch_repos.py to fetch the pinned Oido source")
+        endif()
+        list(APPEND EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/oido/esp32/components/tinyasr")
+    endif()
 endif()
 
 add_definitions(-DFIRMWARE_VERSION=\"${PROJECT_VER}\")
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
-if(STACKCHAN_LOCAL_ITO)
+if(STACKCHAN_CONVERSATION)
+    idf_build_set_property(DEPENDENCIES_LOCK "${CMAKE_CURRENT_SOURCE_DIR}/dependencies.conversation.lock")
+elseif(STACKCHAN_LOCAL_ITO)
     idf_build_set_property(DEPENDENCIES_LOCK "${CMAKE_CURRENT_SOURCE_DIR}/dependencies.ito.lock")
 endif()
 project(stack-chan)

@@ -38,7 +38,14 @@
     {
         "url": "https://github.com/gianpaj/ito.git",
         "path": "ito",
-        "ref": "4b4b37fb02d014eebc01d4c5afb973b514db7d2b",
+        "ref": "6d39d87d08039a24390965c90e59608c75583fa4",
         "version": "local StackChan runtime"
+    },
+    {
+        "url": "https://github.com/lokutor-ai/oido.git",
+        "path": "oido",
+        "ref": "c8d60325ba8bffd4bad65a9ac63c713ee64d1aae",
+        "version": "Oido v2b local recognition",
+        "patch": "patches/oido.patch"
     }
 ]
