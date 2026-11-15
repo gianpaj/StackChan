@@ -8,7 +8,7 @@ import tempfile
 root = Path(__file__).resolve().parent
 source = (root / '../main/hal/board/cores3_audio_codec.cc').resolve().read_text()
 methods = []
-for name in ('LocalMute', 'LocalWrite', 'LocalStartCapture', 'LocalReadCapture', 'LocalEndCapture'):
+for name in ('LocalMute', 'LocalWrite', 'LocalSetVolume', 'LocalStartCapture', 'LocalReadCapture', 'LocalEndCapture', 'LocalOutputReady', 'LocalLogOutputState'):
     start = source.index(f'bool CoreS3AudioCodec::{name}(')
     brace = source.index('{', start)
     depth = 1

@@ -11,6 +11,7 @@ constexpr int ESP_OK = 0, ESP_CODEC_DEV_OK = 0, ESP_FAIL = -1;
 constexpr int ES7210_SEL_MIC1 = 1, AUDIO_CODEC_DMA_FRAME_NUM = 240;
 #define ESP_CODEC_DEV_MAKE_CHANNEL_MASK(i) (1 << (i))
 #define ESP_LOGE(...) ((void)0)
+#define ESP_LOGI(...) ((void)0)
 #define pdMS_TO_TICKS(ms) (ms)
 using esp_err_t = int;
 struct i2s_std_gpio_config_t { int mclk = 0, bclk = 34, ws = 33, dout = 13, din = -1; };
@@ -34,12 +35,14 @@ struct audio_codec_if_t {
     int (*enable)(const audio_codec_if_t*, bool) = nullptr;
     int (*mute_mic)(const audio_codec_if_t*, bool) = nullptr;
     int (*mute)(const audio_codec_if_t*, bool) = nullptr;
+    int (*set_vol)(const audio_codec_if_t*, float) = nullptr;
+    int (*get_reg)(const audio_codec_if_t*, int, int*) = nullptr;
 };
 struct State {
     std::string failure;
     bool failed = false, tx_running = true, rx_allocated = false, rx_running = false;
-    bool mic_power = false, ctrl = false, adc = false, speaker_muted = false;
-    int power_off_attempts = 0, write_calls = 0, gain_db = 0;
+    bool mic_power = false, ctrl = false, adc = false, speaker_muted = false, amp_enabled = true;
+    int power_off_attempts = 0, write_calls = 0, gain_db = 0, delay_ticks = 0;
     std::vector<std::string> events;
 } s;
 int tx_cookie, rx_cookie;
@@ -54,7 +57,7 @@ int i2s_channel_disable(i2s_chan_handle_t h) {
 }
 int i2s_channel_enable(i2s_chan_handle_t h) {
     if (!pass(h == &tx_cookie ? "tx_enable" : "rx_enable")) return ESP_FAIL;
-    if (h == &tx_cookie) assert(!s.mic_power && !s.rx_allocated);
+    if (h == &tx_cookie) assert(!s.mic_power && !s.rx_allocated && !s.amp_enabled);
     (h == &tx_cookie ? s.tx_running : s.rx_running) = true; return ESP_OK;
 }
 int i2s_channel_reconfig_std_gpio(i2s_chan_handle_t, const i2s_std_gpio_config_t* gpio) {
@@ -90,11 +93,12 @@ int i2s_channel_write(i2s_chan_handle_t, const void*, size_t bytes, size_t* writ
 int i2s_channel_get_info(i2s_chan_handle_t, i2s_chan_info_t*) { return ESP_OK; }
 const char* esp_err_to_name(int) { return "mock"; }
 int64_t esp_timer_get_time() { return 1000; }
-void vTaskDelay(int) {}
+void vTaskDelay(int ticks) { s.delay_ticks += ticks; }
 namespace hal_bridge {
 bool board_set_microphone_power(bool enable) {
     if (!enable) ++s.power_off_attempts;
     if (!pass(enable ? "mic_on" : "mic_off")) return false;
+    if (enable) assert(!s.amp_enabled);
     s.mic_power = enable; return true;
 }
 }
@@ -115,7 +119,26 @@ int adc_enable(const audio_codec_if_t*, bool enable) {
 }
 int adc_mute(const audio_codec_if_t*, bool) { return pass("adc_unmute") ? ESP_OK : ESP_FAIL; }
 int output_mute(const audio_codec_if_t*, bool mute) { s.speaker_muted = mute; return ESP_OK; }
-audio_codec_if_t adc_if{adc_fs, adc_gain, adc_enable, adc_mute}, output_if{nullptr, nullptr, nullptr, nullptr, output_mute};
+int output_fs(const audio_codec_if_t*, esp_codec_dev_sample_info_t* fs) {
+    assert(fs->sample_rate == 24000 && fs->bits_per_sample == 16 && fs->channel == 1);
+    return pass("amp_fs") ? ESP_OK : ESP_FAIL;
+}
+int output_enable(const audio_codec_if_t*, bool enable) {
+    if (!pass(enable ? "amp_enable" : "amp_disable")) return ESP_FAIL;
+    if (enable) assert(s.tx_running && !s.rx_allocated && !s.mic_power);
+    s.amp_enabled = enable; return ESP_OK;
+}
+int output_volume(const audio_codec_if_t*, float) { return pass("amp_volume") ? ESP_OK : ESP_FAIL; }
+int output_reg(const audio_codec_if_t*, int reg, int* value) {
+    if (!pass("amp_status_read")) return ESP_FAIL;
+    *value = reg == 1 && s.amp_enabled ? 0x111 : 0;
+    if (reg == 1 && s.failure == "amp_status_timeout") {
+        pass("amp_status_timeout"); *value = 0x20;
+    }
+    return ESP_OK;
+}
+audio_codec_if_t adc_if{adc_fs, adc_gain, adc_enable, adc_mute};
+audio_codec_if_t output_if{output_fs, nullptr, output_enable, nullptr, output_mute, output_volume, output_reg};
 audio_codec_ctrl_if_t ctrl_if;
 const audio_codec_ctrl_if_t* audio_codec_new_i2c_ctrl(audio_codec_i2c_cfg_t*) {
     if (!pass("i2c_new")) return nullptr;
@@ -131,7 +154,7 @@ void audio_codec_delete_ctrl_if(const audio_codec_ctrl_if_t*) { s.ctrl = false; 
 class CoreS3AudioCodec {
 public:
     bool output_enabled_ = true, local_audio_fault_ = false, local_capture_active_ = false;
-    bool local_tx_paused_ = false, local_rx_running_ = false, local_muted_ = false;
+    bool local_tx_paused_ = false, local_rx_running_ = false, local_muted_ = false, local_amp_paused_ = false;
     int output_sample_rate_ = 24000, output_volume_ = 35, local_adc_addr_ = 0x80, local_din_ = 14;
     int64_t local_pending_until_us_ = 0;
     i2s_chan_handle_t tx_handle_ = &tx_cookie, rx_handle_ = nullptr;
@@ -142,6 +165,9 @@ public:
     const audio_codec_ctrl_if_t* in_ctrl_if_ = nullptr;
     bool LocalFlush() { return pass("flush"); }
     bool LocalMute(bool);
+    bool LocalSetVolume(int);
+    bool LocalOutputReady();
+    bool LocalLogOutputState(const char*);
     bool LocalWrite(const int16_t*, size_t);
     bool LocalStartCapture();
     bool LocalReadCapture(int16_t*, size_t);
@@ -154,17 +180,17 @@ int main() {
         CoreS3AudioCodec c;
         assert(c.LocalStartCapture());
         assert(s.gain_db == 30);
-        assert(s.mic_power && s.rx_running && !s.tx_running && s.speaker_muted);
+        assert(s.mic_power && s.rx_running && !s.tx_running && s.speaker_muted && !s.amp_enabled);
         assert(!c.LocalWrite(pcm, 160) && !c.LocalMute(false));
         assert(!c.LocalReadCapture(pcm, 321));
         assert(c.LocalReadCapture(pcm, 320) && pcm[0] == 123);
         assert(c.LocalEndCapture());
         assert(!s.mic_power && !s.rx_allocated && !s.adc && !s.ctrl && s.tx_running);
-        assert(s.speaker_muted && c.LocalWrite(pcm, 160));
+        assert(s.speaker_muted && s.amp_enabled && c.LocalWrite(pcm, 160));
         c.output_volume_ = 0;
         assert(c.LocalMute(false) && s.speaker_muted);
     }
-    for (const char* failure : {"tx_disable", "tx_gpio_detach", "rx_new", "rx_init", "rx_enable", "mic_on",
+    for (const char* failure : {"amp_disable", "tx_disable", "tx_gpio_detach", "rx_new", "rx_init", "rx_enable", "mic_on",
                                 "i2c_new", "adc_new", "adc_fs", "adc_gain", "adc_enable", "adc_unmute", "rx_read", "rx_short"}) {
         s = {}; s.failure = failure;
         CoreS3AudioCodec c;
@@ -172,14 +198,16 @@ int main() {
         assert(s.failed && s.power_off_attempts > 0 && !s.mic_power && !s.rx_allocated && !s.adc && !s.ctrl);
         assert(s.speaker_muted && (s.tx_running || c.local_audio_fault_));
     }
-    for (const char* failure : {"adc_disable", "rx_disable", "rx_delete", "mic_off", "tx_clock", "tx_gpio_restore", "tx_enable"}) {
+    for (const char* failure : {"adc_disable", "rx_disable", "rx_delete", "mic_off", "tx_clock", "tx_gpio_restore", "tx_enable", "amp_fs", "amp_enable", "amp_volume", "amp_status_read", "amp_status_timeout"}) {
         s = {};
         CoreS3AudioCodec c;
         assert(c.LocalStartCapture());
         s.failure = failure;
+        s.delay_ticks = 0;
         assert(!c.LocalEndCapture());
         assert(s.failed && c.local_audio_fault_ && s.power_off_attempts > 0 && s.speaker_muted);
         assert(!c.LocalWrite(pcm, 160) && !c.LocalMute(false));
+        if (s.failure == "amp_status_timeout") assert(s.delay_ticks == 200);
     }
-    std::puts("Capture ownership, bounds and 21 injected failure cases pass");
+    std::puts("Capture ownership, bounds and 27 injected failure cases pass");
 }

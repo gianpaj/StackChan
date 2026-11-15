@@ -22,7 +22,9 @@ every successful start, including failed reads, early submission and cancel.
 
 ## Mechanism
 
-Capture mutes and flushes the speaker, disables TX and releases its pin routing.
+Capture mutes and flushes the speaker, puts AW88298 in standby, disables TX and
+releases its pin routing. Standby prevents an operating amplifier from following
+the microphone's 16 kHz clocks while configured for 24 kHz playback.
 The same codec creates RX on I2S0, powers ALDO2 and initializes ES7210. It discards
 three 320-sample startup buffers. Each subsequent driver read has a 40 ms timeout.
 ES7210 enable selects microphones and rewrites their gain registers from its
@@ -32,7 +34,11 @@ and elapsed time. PCM remains in the controller's buffer.
 
 End disables and deletes ADC/RX resources, verifies microphone power-off and
 restores the original 24 kHz TX clock and GPIO routing. The speaker stays muted
-until TTS playback. Failed clock, resource or power cleanup blocks output and
+while its 16-bit format, amplifier enable and volume are restored. A bounded
+200 ms SYSST check requires PLL lock, stable clocks and amplifier switching
+before TTS can unmute. Register readbacks cover status, control, mute, format and
+volume at initialization, capture handoff and unmute. The TX handle remains the
+original codec handle. Failed clock, amplifier, resource or power cleanup blocks output and
 unmute until restart. Partial startup attempts run the same cleanup.
 
 The PMIC rail mutex preserves capture power across brightness updates. The rail
@@ -55,12 +61,18 @@ Local and normal ESP-IDF builds pass. Logs are
 
 `python3 firmware/tests/local_capture_test.py` executes production capture
 methods with mocked I2S, ADC and power calls. ASan/UBSan pass for ownership,
-read bounds, volume-zero mute and 21 injected startup/cleanup failures.
+read bounds, volume-zero mute and 27 injected startup/cleanup failures, including
+amplifier restart and bounded clock-status timeout. ADC and amplifier mocks have
+separate state.
 
 Native capture delivers exactly 16,000 samples in a one-second test and 128,000
 in an eight-second test, with verified cleanup and no clipping. Applying gain
 after ADC enable raises the measured quiet-test peak from about 170 to 4,219.
 Recognition accuracy and spoken recovery are separate acceptance checks.
+
+The device confirms an audible cold-boot greeting and a silent speech cue after
+real capture, despite accepted PCM writes. The amplifier restart sequence still
+requires an audible check after capture.
 
 The manufacturer schematic identifies MIC1 and MIC2 as the physical microphones
 and MIC3 as speaker feedback. Keep the selected MIC1 route when changing the

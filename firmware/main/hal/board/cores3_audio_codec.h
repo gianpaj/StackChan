@@ -24,11 +24,14 @@ private:
     bool local_capture_active_ = false;
     bool local_tx_paused_ = false;
     bool local_rx_running_ = false;
+    bool local_amp_paused_ = false;
     bool local_audio_fault_ = false;
     void* local_i2c_bus_ = nullptr;
     uint8_t local_adc_addr_ = 0;
     gpio_num_t local_din_ = GPIO_NUM_NC;
     i2s_std_gpio_config_t local_tx_gpio_ = {};
+    bool LocalOutputReady();
+    bool LocalLogOutputState(const char* stage);
 #endif
 
     void CreateDuplexChannels(gpio_num_t mclk, gpio_num_t bclk, gpio_num_t ws, gpio_num_t dout, gpio_num_t din);

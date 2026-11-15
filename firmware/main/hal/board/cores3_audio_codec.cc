@@ -307,7 +307,7 @@ bool CoreS3AudioCodec::LocalOpen(int sample_rate)
     if (!LocalSetVolume(output_volume_)) {
         return false;
     }
-    return LocalFlush();
+    return LocalFlush() && LocalLogOutputState("open");
 }
 
 bool CoreS3AudioCodec::LocalWrite(const int16_t* data, size_t samples)
@@ -342,6 +342,12 @@ bool CoreS3AudioCodec::LocalMute(bool muted)
         return false;
     }
     local_muted_ = muted;
+    if (!muted && !LocalLogOutputState("unmute")) {
+        out_codec_if_->mute(out_codec_if_, true);
+        local_muted_ = true;
+        local_audio_fault_ = true;
+        return false;
+    }
     return true;
 }
 
@@ -413,6 +419,15 @@ bool CoreS3AudioCodec::LocalStartCapture()
         LocalEndCapture();
         return false;
     };
+    if (!LocalLogOutputState("capture-start")) {
+        local_audio_fault_ = true;
+        return fail();
+    }
+    local_amp_paused_ = true;
+    if (out_codec_if_->enable(out_codec_if_, false) != ESP_CODEC_DEV_OK) {
+        local_audio_fault_ = true;
+        return fail();
+    }
     if (i2s_channel_disable(tx_handle_) != ESP_OK) {
         local_audio_fault_ = true;
         return fail();
@@ -540,12 +555,64 @@ bool CoreS3AudioCodec::LocalEndCapture()
             local_tx_paused_ = false;
         }
     }
+    if (ok && !local_audio_fault_ && local_amp_paused_) {
+        esp_codec_dev_sample_info_t format = {};
+        format.bits_per_sample = 16;
+        format.channel = 1;
+        format.sample_rate = output_sample_rate_;
+        if (out_codec_if_->set_fs(out_codec_if_, &format) != ESP_CODEC_DEV_OK ||
+            out_codec_if_->enable(out_codec_if_, true) != ESP_CODEC_DEV_OK ||
+            !LocalSetVolume(output_volume_) || !LocalOutputReady() ||
+            !LocalLogOutputState("capture-end")) {
+            ok = false;
+        } else {
+            local_amp_paused_ = false;
+        }
+    }
     local_capture_active_ = false;
     local_pending_until_us_ = 0;
     if (!ok) {
         local_audio_fault_ = true;
         ESP_LOGE(TAG, "Microphone cleanup failed; speaker remains blocked");
     }
+    if (local_audio_fault_ && local_amp_paused_) {
+        out_codec_if_->mute(out_codec_if_, true);
+        out_codec_if_->enable(out_codec_if_, false);
+    }
     return ok && !local_audio_fault_;
+}
+
+bool CoreS3AudioCodec::LocalLogOutputState(const char* stage)
+{
+    const int registers[] = {0x01, 0x04, 0x05, 0x06, 0x0c};
+    int values[5] = {};
+    for (size_t i = 0; i < 5; ++i) {
+        if (!out_codec_if_->get_reg ||
+            out_codec_if_->get_reg(out_codec_if_, registers[i], &values[i]) != ESP_CODEC_DEV_OK) {
+            ESP_LOGE(TAG, "AW88298 %s readback failed at %02x", stage, registers[i]);
+            return false;
+        }
+    }
+    ESP_LOGI(TAG, "AW88298 %s status=%04x control=%04x mute=%04x format=%04x volume=%04x",
+             stage, values[0], values[1], values[2], values[3], values[4]);
+    return true;
+}
+
+bool CoreS3AudioCodec::LocalOutputReady()
+{
+    // SYSST requires PLL lock, stable clocks and amplifier switching before unmute.
+    for (int attempt = 0; attempt < 20; ++attempt) {
+        int status = 0;
+        if (!out_codec_if_->get_reg ||
+            out_codec_if_->get_reg(out_codec_if_, 0x01, &status) != ESP_CODEC_DEV_OK) {
+            return false;
+        }
+        if ((status & 0x0131) == 0x0111) {
+            return true;
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    LocalLogOutputState("restart-timeout");
+    return false;
 }
 #endif
