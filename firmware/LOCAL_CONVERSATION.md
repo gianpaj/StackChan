@@ -139,8 +139,9 @@ microphone off. Networking and a responder can be added after local acceptance.
 The user confirms microphone recognition, audible Ito echo, mouth animation and
 still motors. The retained run contains 91 completed speech turns, twenty public
 clips matching the host and twenty microphone handoffs with exact 1-, 3- and
-10-second caps. Repeated passes stopped at the user's request.
+10-second caps. Repeated passes stopped at the user's request. The user also confirms
+`listen 5` followed by `echo` from their own monitor session.
 
-[Results and measurements](https://github.com/gianpaj/ito/blob/cee930e6f446fb80db6f046319815a3ad96bbd93/results/stackchan/2026-11-15-manual-oido/README.md) include native memory, stack headroom,
+[Results and measurements](https://github.com/gianpaj/ito/blob/e3df8e75a0ac115670a547db7f5c35f1084d5bb4/results/stackchan/2026-11-15-manual-oido/README.md) include native memory, stack headroom,
 recognition timing, public-set WER, golden PCM, image/model hashes and known
 limits. The mixed public WER is 19.63%; it is separate from host/device parity.

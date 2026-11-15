@@ -61,6 +61,11 @@ proper name in this pilot. Greedy quality on the mixed public set is a separate
 measurement from host/device agreement. Recording precedes recognition, so the
 manual mode does not meet a two-second final-text target for long utterances.
 
+The user independently confirms `listen 5`, then `echo` after
+`CONVERSATION READY`, from their own terminal. The supplied log verifies the
+five-second cap, successful cleanup and zero output underruns. This confirmation
+is separate from the automated run; no additional agent device pass is needed.
+
 Oido uses 204,720 bytes of the borrowed hot region and 1,309,152 bytes of the
 borrowed PSRAM pool. The 320,000-byte recording buffer is separate. Ordinary
 free heap excludes the two reserved inference regions. A dedicated recognizer
@@ -75,4 +80,4 @@ defines codec/power ownership and the required ADC gain and amplifier restart
 sequences. Model weights, private human transcripts and full flash backups stay
 outside Git. No network responder is installed by this milestone.
 
-[Device measurements](https://github.com/gianpaj/ito/blob/cee930e6f446fb80db6f046319815a3ad96bbd93/results/stackchan/2026-11-15-manual-oido/README.md) retain the exact run scope and provenance.
+[Device measurements](https://github.com/gianpaj/ito/blob/e3df8e75a0ac115670a547db7f5c35f1084d5bb4/results/stackchan/2026-11-15-manual-oido/README.md) retain the exact run scope and provenance.
