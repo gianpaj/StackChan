@@ -2,9 +2,12 @@
 
 This profile runs English text-to-speech on StackChan with its original face.
 The face stays visible while idle and opens its mouth during speaker playback.
-Motor and microphone power stay off. Cloud speech, Bluetooth, camera capture
-and network apps are unavailable in this profile. Their menu entries show a
-short message. The normal firmware build retains its original behavior.
+Motor and microphone power stay off. The local profile boots directly into the
+face without a launcher, menus, Home indicator or status bar. Touch input and
+periodic touch reads are disabled. A boot-time FT6336 probe identifies the LCD
+panel, and PMIC power-state polling continues once per second. Native hardware
+power/reset controls remain intact. The normal firmware build retains its
+original behavior.
 
 ## Build
 
@@ -54,8 +57,9 @@ including queued sentences. A new text request is rejected while a job is busy.
 Logs contain serial output, timestamps and image hashes in the session directory
 printed by the monitor. Ctrl-C closes the monitor and releases the USB port.
 
-The home indicator reboots into the original launcher. AI.AGENT and AVATAR
-return to the local speech face. Brightness and volume remain available in Setup.
+USB is the local profile's control interface. The display keeps the original
+breathing, blinking and speaking animation. Hardware reset returns to the face
+and USB speech startup.
 
 ## Flash and recovery
 

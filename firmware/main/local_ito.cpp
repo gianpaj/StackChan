@@ -5,7 +5,6 @@
 #include "hal/board/local_ito_board.h"
 #include <hal/hal.h>
 #include <stackchan/stackchan.h>
-#include <apps/common/common.h>
 #include <esp_heap_caps.h>
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
@@ -64,8 +63,6 @@ void stackchan_start_local_ito()
         {
             LvglLockGuard lock;
             GetStackChan().update();
-            view::update_home_indicator();
-            view::update_status_bar();
         }
         GetHAL().updateHeapStatusLog();
         vTaskDelay(pdMS_TO_TICKS(20));

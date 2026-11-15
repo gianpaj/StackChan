@@ -48,7 +48,7 @@ void Hal::init()
     imu_init();
 #endif
 #if CONFIG_STACKCHAN_LOCAL_ITO
-    // Keep menu actions safe without a servo bus or motor power.
+    // Keep avatar status handlers safe without a servo bus or motor power.
     class LocalServo : public stackchan::motion::Servo {
     public:
         LocalServo() { set_angle_limit({-1800, 1800}); }
@@ -62,7 +62,9 @@ void Hal::init()
 #else
     servo_init();
 #endif
+#if !CONFIG_STACKCHAN_LOCAL_ITO
     lvgl_init();
+#endif
 }
 
 /* -------------------------------------------------------------------------- */
@@ -155,8 +157,10 @@ void Hal::updateHeapStatusLog()
 /* -------------------------------------------------------------------------- */
 #include "board/hal_bridge.h"
 #include <stackchan/stackchan.h>
+#if !CONFIG_STACKCHAN_LOCAL_ITO
 #include <apps/common/common.h>
 #include <assets/assets.h>
+#endif
 
 void Hal::xiaozhi_board_init()
 {
@@ -165,6 +169,7 @@ void Hal::xiaozhi_board_init()
     hal_bridge::xiaozhi_board_init();
 }
 
+#if !CONFIG_STACKCHAN_LOCAL_ITO
 static void _stackchan_update_task(void* param)
 {
     bool is_setup_done = false;
@@ -198,14 +203,14 @@ static void _stackchan_update_task(void* param)
         view::update_status_bar();
     }
 }
+#endif
 
 void Hal::startXiaozhi()
 {
 #if CONFIG_STACKCHAN_LOCAL_ITO
     extern void stackchan_start_local_ito();
     stackchan_start_local_ito();
-    return;
-#endif
+#else
     mclog::tagInfo(_tag, "start xiaozhi");
 
     auto& motion = GetStackChan().motion();
@@ -228,6 +233,7 @@ void Hal::startXiaozhi()
     xTaskCreatePinnedToCore(_stackchan_update_task, "stackchan", 4096, NULL, 3, NULL, 1);
 
     hal_bridge::start_xiaozhi_app();
+#endif
 }
 
 XiaozhiConfig_t Hal::getXiaozhiConfig()
@@ -309,6 +315,7 @@ uint8_t Hal::getSpeakerVolume()
 #include "board/hal_bridge.h"
 #include <stackchan/stackchan.h>
 
+#if !CONFIG_STACKCHAN_LOCAL_ITO
 static void lvgl_read_cb(lv_indev_t* indev, lv_indev_data_t* data)
 {
     hal_bridge::lock();
@@ -343,6 +350,7 @@ void Hal::lvgl_init()
 
     hal_bridge::disply_lvgl_unlock();
 }
+#endif
 
 /* -------------------------------------------------------------------------- */
 /*                                 Warm Reboot                                */

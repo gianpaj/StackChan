@@ -6,9 +6,11 @@
 #include <smooth_ui_toolkit.hpp>
 #include <uitk/short_namespace.hpp>
 #include <mooncake_log.h>
+#include <hal/hal.h>
+#if !CONFIG_STACKCHAN_LOCAL_ITO
 #include <mooncake.h>
 #include <apps/apps.h>
-#include <hal/hal.h>
+#endif
 
 #ifdef CONFIG_STACKCHAN_LOCAL_ITO
 #include "itofs_service.h"
@@ -21,7 +23,9 @@
 #include "freertos/task.h"
 #endif
 
+#if !CONFIG_STACKCHAN_LOCAL_ITO
 using namespace mooncake;
+#endif
 using namespace smooth_ui_toolkit;
 
 #ifdef CONFIG_STACKCHAN_LOCAL_ITO
@@ -60,12 +64,9 @@ extern "C" void app_main(void)
     ui_hal::on_delay([](uint32_t ms) { GetHAL().delay(ms); });
     ui_hal::on_get_tick([]() { return GetHAL().millis(); });
 
+#if !CONFIG_STACKCHAN_LOCAL_ITO
     const bool skip_mooncake =
-#ifdef CONFIG_STACKCHAN_LOCAL_ITO
-        GetHAL().getWarmRebootTarget() < 0;
-#else
         GetHAL().getXiaozhiConfig().startAiAgentOnBoot && GetHAL().getWarmRebootTarget() < 0;
-#endif
 
     if (!skip_mooncake) {
         // Install apps
@@ -94,6 +95,7 @@ extern "C" void app_main(void)
         GetMooncake().uninstallAllApps();
         DestroyMooncake();
     }
+#endif
 
     // Start xiaozhi, never returns
     GetHAL().startXiaozhi();

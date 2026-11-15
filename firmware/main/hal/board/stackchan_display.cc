@@ -275,8 +275,10 @@ void StackChanAvatarDisplay::SetupUI()
     stackchan.attachAvatar(std::move(avatar));
     stackchan.addModifier(std::make_unique<BreathModifier>());
     blink_modifier_id_ = stackchan.addModifier(std::make_unique<BlinkModifier>());
+#if !CONFIG_STACKCHAN_LOCAL_ITO
     stackchan.addModifier(std::make_unique<HeadPetModifier>());
     stackchan.addModifier(std::make_unique<ImuEventModifier>());
+#endif
 
     preview_image_ = lv_image_create(lv_screen_active());
     lv_obj_set_size(preview_image_, 320, 240);

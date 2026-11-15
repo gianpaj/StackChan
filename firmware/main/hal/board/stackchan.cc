@@ -378,7 +378,7 @@ private:
     Ft6336* ft6336_;
     LvglDisplay* display_;
     StackChanCamera* camera_ = nullptr;
-    esp_timer_handle_t touchpad_timer_;
+    esp_timer_handle_t board_poll_timer_;
     PowerSaveTimer* power_save_timer_ = nullptr;
     hal_bridge::XiaozhiConfig_t xiaozhi_config_;
     std::mutex power_state_mutex_;
@@ -568,24 +568,33 @@ private:
         ft6336_ = new Ft6336(i2c_bus_, 0x38);
     }
 
-    void StartTouchpadTimer()
+    void StartBoardPollTimer()
     {
-        // 创建定时器，20ms 间隔
         esp_timer_create_args_t timer_args = {
             .callback =
                 [](void* arg) {
                     M5StackCoreS3Board* board = (M5StackCoreS3Board*)arg;
+#if !CONFIG_STACKCHAN_LOCAL_ITO
                     board->PollTouchpad();
+#endif
                     board->PollPowerSaveState();
                 },
             .arg                   = this,
             .dispatch_method       = ESP_TIMER_TASK,
+#if CONFIG_STACKCHAN_LOCAL_ITO
+            .name                  = "power_poll_timer",
+#else
             .name                  = "touchpad_timer",
+#endif
             .skip_unhandled_events = true,
         };
 
-        ESP_ERROR_CHECK(esp_timer_create(&timer_args, &touchpad_timer_));
-        ESP_ERROR_CHECK(esp_timer_start_periodic(touchpad_timer_, 20 * 1000));
+        ESP_ERROR_CHECK(esp_timer_create(&timer_args, &board_poll_timer_));
+#if CONFIG_STACKCHAN_LOCAL_ITO
+        ESP_ERROR_CHECK(esp_timer_start_periodic(board_poll_timer_, kPowerStatePollIntervalMs * 1000));
+#else
+        ESP_ERROR_CHECK(esp_timer_start_periodic(board_poll_timer_, 20 * 1000));
+#endif
     }
 
     void InitializeSpi()
@@ -718,7 +727,7 @@ public:
 #if !CONFIG_STACKCHAN_LOCAL_ITO
         InitializeCamera();
 #endif
-        StartTouchpadTimer();
+        StartBoardPollTimer();
         GetBacklight()->RestoreBrightness();
     }
 

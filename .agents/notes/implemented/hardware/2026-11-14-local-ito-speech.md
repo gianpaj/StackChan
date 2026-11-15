@@ -1,13 +1,22 @@
-# Local Ito speech in the original application
+# Agent Note: Local Ito speech in the original application
 
-Status: deployed speech, face animation, cancellation and launcher re-entry pass. The deployed code is `f799097`, with Ito runtime `b741244`.
+Status: implemented. USB speech uses the original face and codec.
+
+## Problem
+
+Native speech needs the existing face and audio hardware without cloud speech
+services, motor movement or a second I2S owner.
 
 ## Decision
 
-Use the original StackChan face, launcher, setup controls and AW88298 codec.
-A dedicated local build replaces the cloud AI handoff. The normal build keeps
-its cloud behavior. Copying a face into the standalone Ito image was rejected
-because the user chose full original-firmware integration.
+Use the original StackChan face and AW88298 codec. The local build boots directly
+into the face and takes speech commands over USB. Touch input, the launcher and
+setup menus are excluded from the local profile. The normal build keeps its
+cloud behavior and controls.
+
+The [touch-free profile note](../simplification/2026-11-15-touch-free-local-profile.md)
+records this application boundary and its measurements. Device results below describe
+the identified deployed checkpoints.
 
 The Ito component and frontend come from the revision in `firmware/repos.json`.
 The shared runtime retains its six-buffer queue, scheduler, calibration,
@@ -21,13 +30,22 @@ lets the subscribed IDLE task run during silent calibration. Ito does not take
 over RWDT. The hot arena is reserved before HAL initialization and must remain
 in internal SRAM. The frontend's static buffers use PSRAM.
 
-## Local profile boundary
+## Alternatives considered
+
+Copying a face into the standalone Ito image loses the original application
+integration selected by the user. A second codec/I2S owner would make DMA and
+cancellation ownership ambiguous.
+
+## Consequences
+
+### Local profile boundary
 
 Motor power is clamped off and motion uses no-op servos. Microphone power stays
 off, with PMIC rail readback. The local codec allocates no RX channel or ES7210.
 Bluetooth, camera startup, cloud audio/SR services and idle shutdown are disabled.
-Unsupported launcher/setup actions keep their labels and show an existing toast.
-Brightness, volume and the local avatar remain usable without network setup.
+The local profile excludes app installation and menu entry paths. It creates no
+LVGL touch input, Home indicator or status bar. The one-time panel probe and PMIC
+power polling remain active. Native hardware power/reset controls are unchanged.
 
 The local profile keeps the standalone Ito NVS layout, `0x9000` with 24 KB.
 This preserves the stored failed-full verdict without migration. OTA metadata
@@ -99,8 +117,8 @@ The early hook sets ordinary malloc allocations to prefer PSRAM through
 `heap_caps_malloc_extmem_enable(0)`. DMA and task stacks still request internal
 memory. This keeps UI objects outside the SRAM reserved for synthesis. Head-pet
 and IMU modifiers are disabled in this profile, so their sensor initialization
-and head-touch worker are omitted. Display touch for the original menus stays
-active. The normal profile retains its original initialization.
+and head-touch worker are omitted. The `f799097` measurement includes display
+touch for the original menus. The normal profile retains its original initialization.
 
 The local and normal firmware builds pass. No engine or model arithmetic
 changes are part of this correction.

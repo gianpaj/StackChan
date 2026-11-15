@@ -8,7 +8,6 @@
 #include <display.h>
 #include <hal/hal.h>
 #include <assets/lang_config.h>
-#include <apps/common/common.h>
 #include <stackchan/stackchan.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -34,8 +33,7 @@ bool prepare_avatar()
         if (!GetStackChan().hasAvatar()) {
             return false;
         }
-        view::create_home_indicator([]() { GetHAL().requestWarmReboot(0); }, 0x81DBBD, 0x134233);
-        view::create_status_bar(0x81DBBD, 0x134233);
+        GetHAL().bootLogo.reset();
     }
     display->SetStatus(Lang::Strings::STANDBY);
     return true;
