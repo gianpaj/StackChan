@@ -1,6 +1,6 @@
 # Agent Note: Bounded microphone capture
 
-Status: implemented — Native capture counts and cleanup pass; speech quality is under test.
+Status: implemented — Capture and audible playback recovery pass device acceptance.
 
 ## Problem
 
@@ -65,14 +65,12 @@ read bounds, volume-zero mute and 27 injected startup/cleanup failures, includin
 amplifier restart and bounded clock-status timeout. ADC and amplifier mocks have
 separate state.
 
-Native capture delivers exactly 16,000 samples in a one-second test and 128,000
-in an eight-second test, with verified cleanup and no clipping. Applying gain
-after ADC enable raises the measured quiet-test peak from about 170 to 4,219.
-Recognition accuracy and spoken recovery are separate acceptance checks.
-
-The device confirms an audible cold-boot greeting and a silent speech cue after
-real capture, despite accepted PCM writes. The amplifier restart sequence still
-requires an audible check after capture.
+Native capture delivers exact 1-, 3- and 10-second sample caps across twenty
+recordings, with verified cleanup and no clipping. The human eight-second trial
+captures 128,000 samples, peak 7,908 and no clipping. The user confirms an audible
+post-capture greeting, followed by local transcription and audible Ito echo with
+mouth movement and still motors. These are manual acceptance checks, not a
+broad recognition-quality benchmark.
 
 The manufacturer schematic identifies MIC1 and MIC2 as the physical microphones
 and MIC3 as speaker feedback. Keep the selected MIC1 route when changing the

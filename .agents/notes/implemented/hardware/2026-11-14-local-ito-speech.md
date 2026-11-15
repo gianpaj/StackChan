@@ -198,5 +198,7 @@ vary slightly; exact zero global heap drift is not claimed.
 [Shared workspace measurements](https://github.com/gianpaj/ito/blob/0c2c7cd5a0163755375fb8fe6ce191320d4595e5/results/stackchan/2026-11-15-local-stt-ito/README.md) record the 4,891,328-byte PSRAM
 lease, 239,948-byte internal lease, free heap, 447-448 ms weight reload and
 710-730 ms probe-return to resume-complete interval. Models, assets, layout and
-motor/microphone power policy remain unchanged. Actual STT and networking are
-separate integration work.
+motor/microphone power policy describe the USB TTS profile. The separate
+[manual conversation profile](../feature/2026-11-15-usb-local-conversation.md)
+implements Oido capture/transcription and Ito replies. Networking remains a
+separate integration gate.
