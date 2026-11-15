@@ -24,18 +24,42 @@ struct Metrics {
     int64_t finish_us = 0;
 };
 
-/* Recognize at most 10 seconds of signed mono 16 kHz PCM with Oido v2b,
- * chunk 8/context 64, greedy decoding and flash-resident weights, without LM.
- * The caller owns a stopped-Ito lease and PCM storage outside its ranges.
- * This call frees all recognizer state and restores global hooks before return;
- * only then may the caller return the lease and resume Ito.
- * Use at least 12 KiB of internal caller stack and measure its high-water use.
- * Cancellation is cooperative between 320-sample feed calls and before finish.
- * progress runs on this worker after completed work; it may feed the active
- * phase watchdog and must yield. Without a callback this call yields itself.
- * Output needs at least 2048 bytes outside the workspace. Once admitted, errors
- * and cancellation leave it empty. Rejected calls leave output and metrics alone.
- * Concurrent calls are rejected.
+/* One worker owns a stopped-Ito workspace until close() returns. begin() checks
+ * the complete model before capture; feed() consumes 1..320 mono 16 kHz samples
+ * before returning, with a total bound of 160000 samples. PCM and transcript
+ * storage must be outside both workspace ranges. finish() needs 2048 bytes.
+ *
+ * The session holds the process-wide Oido allocator and parallel hooks. Another
+ * session is rejected until close(). Call its methods on one worker only.
+ * Cancellation is cooperative between feed calls and before/after finish.
+ * progress runs after completed work, must yield, and may feed the watchdog.
+ * Without a progress callback the adapter yields itself. Use at least 12 KiB
+ * of internal worker stack and measure its high-water use.
+ *
+ * begin() failures clean up immediately. feed()/finish() failures require close()
+ * before the caller returns the lease. close() is idempotent, reports metrics
+ * even after a failed begin(), and restores hooks and mappings before return.
+ */
+class Session {
+public:
+    Session() = default;
+    ~Session();
+    Session(const Session&) = delete;
+    Session& operator=(const Session&) = delete;
+    esp_err_t begin(const itofs_workspace_t& workspace, const Callbacks& callbacks = {});
+    esp_err_t feed(const int16_t* pcm, size_t samples);
+    esp_err_t finish(char* output, size_t output_capacity);
+    esp_err_t close(Metrics* metrics = nullptr);
+
+private:
+    bool owns_run_ = false;
+    esp_err_t result_ = ESP_OK;
+    Metrics metrics_{};
+};
+
+/* Batch compatibility wrapper with chunk 8/context 64, greedy decoding, no LM,
+ * and flash-resident Oido v2b weights. Rejected calls leave output and metrics
+ * unchanged. Admitted errors leave output empty. All state closes before return.
  */
 esp_err_t recognize(const itofs_workspace_t& workspace, const int16_t* pcm,
                     size_t samples, char* output, size_t output_capacity,

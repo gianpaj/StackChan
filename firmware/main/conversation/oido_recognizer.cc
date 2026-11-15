@@ -20,7 +20,7 @@ constexpr size_t kModelBytes = 5931424;
 constexpr size_t kMaxSamples = 10 * 16000;
 constexpr size_t kTextBytes = 2048;
 constexpr size_t kMinimumHot = 224 * 1024;
-constexpr size_t kMinimumPsram = 2 * 1024 * 1024;
+constexpr size_t kMinimumPsram = 1280 * 1024;
 constexpr int64_t kProgressIntervalUs = 100000;
 constexpr uint8_t kModelSha256[] = {
     0x9e, 0x8b, 0x40, 0x91, 0x3f, 0x53, 0x2f, 0xb4,
@@ -58,6 +58,8 @@ struct Run {
     Arena psram;
     Callbacks callbacks;
     Metrics metrics;
+    size_t samples = 0;
+    bool finished = false;
     int64_t last_progress = 0;
     bool allocation_failed = false;
     bool invalid_free = false;
@@ -76,6 +78,7 @@ struct Run {
 
 std::atomic_flag busy = ATOMIC_FLAG_INIT;
 Run* active_run = nullptr;
+Run session_run{};
 
 bool cancelled(const Run& run)
 {
@@ -152,9 +155,8 @@ esp_err_t verify_model(Run& run)
     return std::memcmp(digest, kModelSha256, sizeof digest) == 0 ? ESP_OK : ESP_ERR_INVALID_CRC;
 }
 
-esp_err_t run_recognition(Run& run, const int16_t* pcm, size_t samples, char* output)
+esp_err_t open_run(Run& run)
 {
-    const int64_t setup_start = esp_timer_get_time();
     if (cancelled(run)) return kCancelled;
     const esp_partition_t* partition = esp_partition_find_first(
         ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "oido");
@@ -190,24 +192,7 @@ esp_err_t run_recognition(Run& run, const int16_t* pcm, size_t samples, char* ou
     if (cancelled(run)) return kCancelled;
     run.stream = tasr_nemo_stream_new(run.model, 8, 64, nullptr);
     if (!run.stream) return run.allocation_failed ? ESP_ERR_NO_MEM : ESP_ERR_INVALID_RESPONSE;
-    run.metrics.setup_us = esp_timer_get_time() - setup_start;
-
-    const int64_t feed_start = esp_timer_get_time();
-    for (size_t offset = 0; offset < samples; offset += 320) {
-        if (cancelled(run)) return kCancelled;
-        const int count = static_cast<int>(std::min(size_t(320), samples - offset));
-        run.metrics.encoder_frames = tasr_nemo_stream_feed(run.stream, pcm + offset, count);
-        if (run.metrics.encoder_frames < 0) return ESP_FAIL;
-        progress(run);
-    }
-    run.metrics.feed_us = esp_timer_get_time() - feed_start;
-    if (cancelled(run)) return kCancelled;
-    const int64_t finish_start = esp_timer_get_time();
-    run.metrics.encoder_frames = tasr_nemo_stream_finish(run.stream, output, kTextBytes);
-    run.metrics.finish_us = esp_timer_get_time() - finish_start;
-    progress(run);
-    if (cancelled(run)) return kCancelled;
-    return run.metrics.encoder_frames < 0 ? ESP_FAIL : ESP_OK;
+    return ESP_OK;
 }
 
 void close_run(Run& run)
@@ -228,7 +213,99 @@ void close_run(Run& run)
     run.blob = nullptr;
 }
 
+bool valid_workspace(const itofs_workspace_t& workspace)
+{
+    return workspace.hot && workspace.psram &&
+        !(reinterpret_cast<uintptr_t>(workspace.hot) & 15) &&
+        !(reinterpret_cast<uintptr_t>(workspace.psram) & 15) &&
+        !overlaps(workspace.hot, workspace.hot_bytes, workspace.psram, workspace.psram_bytes);
+}
+
+itofs_workspace_t workspace_of(const Run& run)
+{
+    return {run.hot.base, run.hot.capacity, run.psram.base, run.psram.capacity};
+}
+
 }  // namespace
+
+Session::~Session() { close(); }
+
+esp_err_t Session::begin(const itofs_workspace_t& workspace, const Callbacks& callbacks)
+{
+    if (owns_run_) return ESP_ERR_INVALID_STATE;
+    if (!workspace.hot || !workspace.psram || workspace.hot_bytes < kMinimumHot ||
+        workspace.psram_bytes < kMinimumPsram) return ESP_ERR_NO_MEM;
+    if (!valid_workspace(workspace) || touches_workspace(workspace, this, sizeof *this))
+        return ESP_ERR_INVALID_ARG;
+    if (busy.test_and_set(std::memory_order_acquire)) return ESP_ERR_INVALID_STATE;
+    owns_run_ = true;
+    result_ = ESP_OK;
+    metrics_ = {};
+    session_run = Run{{static_cast<uint8_t*>(workspace.hot), workspace.hot_bytes},
+                      {static_cast<uint8_t*>(workspace.psram), workspace.psram_bytes}, callbacks, {}};
+    const int64_t started = esp_timer_get_time();
+    result_ = open_run(session_run);
+    session_run.metrics.setup_us = esp_timer_get_time() - started;
+    if (result_ != ESP_OK) close();
+    return result_;
+}
+
+esp_err_t Session::feed(const int16_t* pcm, size_t samples)
+{
+    if (!owns_run_ || session_run.finished) return ESP_ERR_INVALID_STATE;
+    if (result_ != ESP_OK) return result_;
+    if (!pcm || !samples || samples > 320 || samples > kMaxSamples - session_run.samples ||
+        touches_workspace(workspace_of(session_run), pcm, samples * sizeof *pcm))
+        return ESP_ERR_INVALID_ARG;
+    if (cancelled(session_run)) return result_ = kCancelled;
+    const int64_t started = esp_timer_get_time();
+    session_run.metrics.encoder_frames = tasr_nemo_stream_feed(session_run.stream, pcm,
+                                                              static_cast<int>(samples));
+    session_run.metrics.feed_us += esp_timer_get_time() - started;
+    session_run.samples += samples;
+    progress(session_run);
+    if (cancelled(session_run)) result_ = kCancelled;
+    else if (session_run.metrics.encoder_frames < 0) result_ = ESP_FAIL;
+    return result_;
+}
+
+esp_err_t Session::finish(char* output, size_t output_capacity)
+{
+    if (!owns_run_ || session_run.finished) return ESP_ERR_INVALID_STATE;
+    if (!output) return ESP_ERR_INVALID_ARG;
+    if (output_capacity < kTextBytes || output_capacity > static_cast<size_t>(INT32_MAX))
+        return ESP_ERR_INVALID_SIZE;
+    if (touches_workspace(workspace_of(session_run), output, output_capacity))
+        return ESP_ERR_INVALID_ARG;
+    output[0] = '\0';
+    if (result_ != ESP_OK) return result_;
+    if (!session_run.samples) return ESP_ERR_INVALID_STATE;
+    session_run.finished = true;
+    if (cancelled(session_run)) return result_ = kCancelled;
+    const int64_t started = esp_timer_get_time();
+    session_run.metrics.encoder_frames = tasr_nemo_stream_finish(session_run.stream, output, kTextBytes);
+    session_run.metrics.finish_us = esp_timer_get_time() - started;
+    progress(session_run);
+    if (cancelled(session_run)) result_ = kCancelled;
+    else if (session_run.metrics.encoder_frames < 0) result_ = ESP_FAIL;
+    if (result_ != ESP_OK) output[0] = '\0';
+    return result_;
+}
+
+esp_err_t Session::close(Metrics* metrics)
+{
+    if (owns_run_) {
+        close_run(session_run);
+        session_run.metrics.hot_used = session_run.hot.used;
+        session_run.metrics.psram_used = session_run.psram.used;
+        if (session_run.invalid_free && result_ == ESP_OK) result_ = ESP_FAIL;
+        metrics_ = session_run.metrics;
+        owns_run_ = false;
+        busy.clear(std::memory_order_release);
+    }
+    if (metrics) *metrics = metrics_;
+    return result_;
+}
 
 esp_err_t recognize(const itofs_workspace_t& workspace, const int16_t* pcm, size_t samples,
                     char* output, size_t output_capacity, const Callbacks& callbacks,
@@ -239,25 +316,19 @@ esp_err_t recognize(const itofs_workspace_t& workspace, const int16_t* pcm, size
         return ESP_ERR_INVALID_SIZE;
     if (!workspace.hot || !workspace.psram || workspace.hot_bytes < kMinimumHot ||
         workspace.psram_bytes < kMinimumPsram) return ESP_ERR_NO_MEM;
-    if ((reinterpret_cast<uintptr_t>(workspace.hot) & 15) ||
-        (reinterpret_cast<uintptr_t>(workspace.psram) & 15) ||
-        overlaps(workspace.hot, workspace.hot_bytes, workspace.psram, workspace.psram_bytes) ||
+    if (!valid_workspace(workspace) ||
         touches_workspace(workspace, pcm, samples * sizeof(int16_t)) ||
         touches_workspace(workspace, output, output_capacity)) return ESP_ERR_INVALID_ARG;
-    if (busy.test_and_set(std::memory_order_acquire)) return ESP_ERR_INVALID_STATE;
-    if (metrics) *metrics = {};
+    Session session;
+    esp_err_t error = session.begin(workspace, callbacks);
+    if (error == ESP_ERR_INVALID_STATE) return error;
     output[0] = '\0';
-
-    Run run{{static_cast<uint8_t*>(workspace.hot), workspace.hot_bytes},
-            {static_cast<uint8_t*>(workspace.psram), workspace.psram_bytes}, callbacks, {}};
-    esp_err_t error = run_recognition(run, pcm, samples, output);
-    close_run(run);
-    run.metrics.hot_used = run.hot.used;
-    run.metrics.psram_used = run.psram.used;
-    if (run.invalid_free && error == ESP_OK) error = ESP_FAIL;
-    if (metrics) *metrics = run.metrics;
+    for (size_t offset = 0; error == ESP_OK && offset < samples; offset += 320)
+        error = session.feed(pcm + offset, std::min(size_t(320), samples - offset));
+    if (error == ESP_OK) error = session.finish(output, output_capacity);
+    const esp_err_t closed = session.close(metrics);
+    if (error == ESP_OK) error = closed;
     if (error != ESP_OK) output[0] = '\0';
-    busy.clear(std::memory_order_release);
     return error;
 }
 

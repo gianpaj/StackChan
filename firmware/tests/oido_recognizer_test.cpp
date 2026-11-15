@@ -2,6 +2,7 @@
 #include "esp_partition.h"
 #include "mbedtls/sha256.h"
 #include "tinyasr.h"
+#include <algorithm>
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
@@ -19,8 +20,8 @@ bool missing = false, map_failure = false, bad_digest = false;
 int64_t now = 0;
 itofs_workspace_t workspace;
 std::vector<int16_t> pcm;
-bool nested = false;
-bool is_cancelled() { return cancel_at && ++checks >= cancel_at; }
+bool nested = false, force_cancel = false;
+bool is_cancelled() { return force_cancel || (cancel_at && ++checks >= cancel_at); }
 void on_progress()
 {
     ++delays;
@@ -38,6 +39,7 @@ void reset()
     assert(mappings == 0);
     missing = map_failure = bad_digest = false;
     checks = cancel_at = 0;
+    force_cancel = false;
     std::memset(workspace.hot, 0xa5, workspace.hot_bytes);
     std::memset(workspace.psram, 0xa5, workspace.psram_bytes);
 }
@@ -113,17 +115,94 @@ int main(int argc, char** argv)
     reset(); cancel_at = 3; assert(run() == oido_recognizer::kCancelled);
     reset(); cancel_at = 100; assert(run() == oido_recognizer::kCancelled);
     assert(metrics.allocations > 0);
-    reset(); cancel_at = 130; assert(run() == oido_recognizer::kCancelled);
-    assert(metrics.encoder_frames > 0);
-    std::string baseline;
-    for (int cycle = 0; cycle < 3; ++cycle) {
-        reset(); nested = true; assert(run() == ESP_OK);
-        assert(output[0] && metrics.allocations == 59);
-        assert(metrics.hot_used < workspace.hot_bytes && metrics.psram_used < workspace.psram_bytes);
-        if (cycle == 0) baseline = output;
-        else assert(baseline == output);
+    reset(); nested = true; assert(run() == ESP_OK);
+    assert(output[0] && metrics.allocations == 59);
+    assert(metrics.hot_used < workspace.hot_bytes && metrics.psram_used < workspace.psram_bytes);
+    const std::string baseline = output;
+    // The real scratch-only lease leaves this tail after copied Ito weights.
+    workspace.psram_bytes = 1695168;
+    reset();
+    {
+        oido_recognizer::Session session, blocked;
+        assert(session.feed(pcm.data(), 1) == ESP_ERR_INVALID_STATE);
+        assert(session.begin(workspace, callbacks) == ESP_OK);
+        assert(mappings == 1 && tasr_alloc != alloc_hook);
+        assert(session.begin(workspace) == ESP_ERR_INVALID_STATE);
+        assert(blocked.begin(workspace) == ESP_ERR_INVALID_STATE);
+        assert(blocked.close() == ESP_OK && mappings == 1);
+        std::strcpy(output, "untouched");
+        assert(session.finish(output, 32) == ESP_ERR_INVALID_SIZE);
+        assert(!std::strcmp(output, "untouched"));
+        assert(session.finish(static_cast<char*>(workspace.psram), sizeof output) == ESP_ERR_INVALID_ARG);
+        assert(session.finish(output, sizeof output) == ESP_ERR_INVALID_STATE);
+        assert(session.feed(nullptr, 1) == ESP_ERR_INVALID_ARG);
+        assert(session.feed(pcm.data(), 0) == ESP_ERR_INVALID_ARG);
+        assert(session.feed(pcm.data(), 321) == ESP_ERR_INVALID_ARG);
+        assert(session.feed(static_cast<int16_t*>(workspace.psram), 320) == ESP_ERR_INVALID_ARG);
+        int16_t chunk[320];
+        for (size_t offset = 0; offset < pcm.size(); offset += 320) {
+            const size_t count = std::min(size_t(320), pcm.size() - offset);
+            std::memcpy(chunk, pcm.data() + offset, count * sizeof *chunk);
+            assert(session.feed(chunk, count) == ESP_OK);
+            // Consumer may reuse the producer's chunk as soon as feed returns.
+            std::memset(chunk, 0xa5, sizeof chunk);
+        }
+        assert(session.finish(output, sizeof output) == ESP_OK);
+        assert(baseline == output);
+        assert(session.feed(pcm.data(), 1) == ESP_ERR_INVALID_STATE);
+        assert(session.finish(output, sizeof output) == ESP_ERR_INVALID_STATE);
+        assert(session.close(&metrics) == ESP_OK);
+        assert(metrics.setup_us > 0 && metrics.feed_us > 0 && metrics.finish_us > 0);
+        assert(metrics.psram_used <= workspace.psram_bytes && metrics.hot_used <= workspace.hot_bytes);
+        const auto used = metrics.psram_used;
+        assert(session.close(&metrics) == ESP_OK && metrics.psram_used == used);
+        std::printf("streaming scratch: hot=%zu psram=%zu bytes\n", metrics.hot_used, metrics.psram_used);
+        assert(mappings == 0 && tasr_alloc == alloc_hook && tasr_free == free_hook);
+        assert(tasr_parallel == parallel_hook && tasr_par_mask == mask && tasr_wpf == wpf);
     }
+    // Cancellation during a live session cannot strand global hooks or mapping.
+    reset();
+    {
+        oido_recognizer::Session session;
+        assert(session.begin(workspace, callbacks) == ESP_OK);
+        for (size_t offset = 0; offset < 25600; offset += 320)
+            assert(session.feed(pcm.data() + offset, 320) == ESP_OK);
+        force_cancel = true;
+        assert(session.feed(pcm.data(), 320) == oido_recognizer::kCancelled);
+        std::strcpy(output, "stale");
+        assert(session.finish(output, sizeof output) == oido_recognizer::kCancelled && !output[0]);
+        assert(session.close(&metrics) == oido_recognizer::kCancelled);
+        assert(metrics.setup_us > 0 && metrics.feed_us > 0 && metrics.encoder_frames > 0);
+    }
+    reset();
+    {
+        oido_recognizer::Session session;
+        assert(session.begin(workspace) == ESP_OK);
+        int16_t silence[320]{};
+        for (int index = 0; index < 500; ++index) assert(session.feed(silence, 320) == ESP_OK);
+        assert(session.feed(silence, 1) == ESP_ERR_INVALID_ARG);
+        // Scope exit must close an unfinished/capped session.
+    }
+    reset();
+    {
+        oido_recognizer::Session session;
+        auto invalid = workspace;
+        invalid.psram_bytes = 1280 * 1024 - 1;
+        assert(session.begin(invalid) == ESP_ERR_NO_MEM && mappings == 0);
+        invalid = workspace; invalid.hot_bytes = 224 * 1024 - 1;
+        assert(session.begin(invalid) == ESP_ERR_NO_MEM && mappings == 0);
+        invalid = workspace; invalid.psram = workspace.hot;
+        assert(session.begin(invalid) == ESP_ERR_INVALID_ARG && mappings == 0);
+        invalid = workspace; invalid.psram = static_cast<unsigned char*>(workspace.psram) + 1;
+        assert(session.begin(invalid) == ESP_ERR_INVALID_ARG && mappings == 0);
+        // Verify the admitted lower bound with the actual engine allocations.
+        invalid = workspace; invalid.psram_bytes = 1280 * 1024;
+        assert(session.begin(invalid) == ESP_OK);
+        assert(session.close(&metrics) == ESP_OK && metrics.psram_used <= invalid.psram_bytes);
+    }
+    assert(mappings == 0 && tasr_alloc == alloc_hook && tasr_free == free_hook);
+    assert(tasr_parallel == parallel_hook && tasr_par_mask == mask && tasr_wpf == wpf);
     assert(delays > 0);
-    std::printf("adapter: cleanup, cancellation, reentry and 3 overwrite cycles pass\n%s\n", output);
+    std::printf("adapter: batch/stream parity, scratch bounds, cancellation, cap and cleanup pass\n%s\n", baseline.c_str());
     std::free(workspace.hot); std::free(workspace.psram);
 }
