@@ -1,0 +1,5 @@
+# Oido lookup-table BSS uses PSRAM; inference hot storage comes from the lease.
+[mapping:local_oido]
+archive: libtinyasr.a
+entries:
+    * (extram_bss)

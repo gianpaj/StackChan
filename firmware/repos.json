@@ -2,32 +2,50 @@
     {
         "url": "https://github.com/Forairaaaaa/mooncake.git",
         "path": "components/mooncake",
-        "branch": "v2.3.3"
+        "ref": "572a7e488641f1c3f22e85d65c27f095ecf27d12",
+        "version": "v2.3.3"
     },
     {
         "url": "https://github.com/Forairaaaaa/mooncake_log.git",
         "path": "components/mooncake_log",
-        "branch": "v1.5.0"
+        "ref": "554d55cd8c6e551b911b99cad274a46929f05bae",
+        "version": "v1.5.0"
     },
     {
         "url": "https://github.com/Forairaaaaa/smooth_ui_toolkit.git",
         "path": "components/smooth_ui_toolkit",
-        "branch": "v2.12.0"
+        "ref": "2a18ff5d3fd6b402339d0f4f3c2834f574e3cb05",
+        "version": "v2.12.0"
     },
     {
         "url": "https://github.com/78/xiaozhi-esp32.git",
         "path": "xiaozhi-esp32",
-        "branch": "v2.2.4",
-        "patch": "patches/xiaozhi-esp32.patch"
+        "patch": "patches/xiaozhi-esp32.patch",
+        "ref": "e77dedb1309153bb63fed285772962c920c97dd4",
+        "version": "v2.2.4"
     },
     {
         "url": "https://github.com/bblanchon/ArduinoJson.git",
         "path": "components/ArduinoJson",
-        "branch": "v7.4.2"
+        "ref": "733bc4ee82630c88c0a619a883cd3a206efae977",
+        "version": "v7.4.2"
     },
     {
         "url": "https://github.com/espressif/esp-now.git",
         "path": "components/esp-now",
-        "branch": "c33383de97f3ed2fc52117f5ef04f71990432e5d"
+        "ref": "c33383de97f3ed2fc52117f5ef04f71990432e5d"
+    },
+    {
+        "url": "https://github.com/gianpaj/ito.git",
+        "path": "ito",
+        "ref": "59bbfc4d66e99a10a731cedb6720490ac04d0d98",
+        "version": "local StackChan runtime"
+    },
+    {
+        "url": "https://github.com/lokutor-ai/oido.git",
+        "path": "oido",
+        "ref": "c8d60325ba8bffd4bad65a9ac63c713ee64d1aae",
+        "version": "Oido v2b local recognition",
+        "patch": "patches/oido.patch"
     }
 ]

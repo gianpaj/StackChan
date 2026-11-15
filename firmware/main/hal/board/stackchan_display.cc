@@ -131,7 +131,11 @@ StackChanAvatarDisplay::StackChanAvatarDisplay(esp_lcd_panel_io_handle_t panel_i
         .io_handle      = panel_io_,
         .panel_handle   = panel_,
         .control_handle = nullptr,
+#if CONFIG_STACKCHAN_LOCAL_ITO
+        .buffer_size    = static_cast<uint32_t>(width_ * 8),
+#else
         .buffer_size    = static_cast<uint32_t>(width_ * 20),
+#endif
         .double_buffer  = false,
         .trans_size     = 0,
         .hres           = static_cast<uint32_t>(width_),
@@ -253,6 +257,7 @@ void StackChanAvatarDisplay::SetupUI()
 
     auto avatar = std::make_unique<DefaultAvatar>();
     avatar->init(lv_screen_active());
+#if !CONFIG_STACKCHAN_LOCAL_ITO
     avatar->getPanel()->onClick().connect([]() {
         static uint32_t last_toggle_tick = 0;
         const uint32_t now               = GetHAL().millis();
@@ -266,11 +271,14 @@ void StackChanAvatarDisplay::SetupUI()
         }
     });
 
+#endif
     stackchan.attachAvatar(std::move(avatar));
     stackchan.addModifier(std::make_unique<BreathModifier>());
     blink_modifier_id_ = stackchan.addModifier(std::make_unique<BlinkModifier>());
+#if !CONFIG_STACKCHAN_LOCAL_ITO
     stackchan.addModifier(std::make_unique<HeadPetModifier>());
     stackchan.addModifier(std::make_unique<ImuEventModifier>());
+#endif
 
     preview_image_ = lv_image_create(lv_screen_active());
     lv_obj_set_size(preview_image_, 320, 240);
@@ -280,7 +288,11 @@ void StackChanAvatarDisplay::SetupUI()
     // GetHAL().startStackChanAutoUpdate(24);
 
     auto config        = hal_bridge::get_xiaozhi_config();
+#if CONFIG_STACKCHAN_LOCAL_ITO
+    idle_motion_level_ = 0;
+#else
     idle_motion_level_ = config.idleRandomMovementLevel;
+#endif
 
     ESP_LOGI(TAG, "Avatar created and started");
 }
@@ -532,6 +544,9 @@ void StackChanAvatarDisplay::SetStatus(const char* status)
         avatar.setSpeech(status);
     }
 
+#if CONFIG_STACKCHAN_LOCAL_ITO
+    _is_xiaozhi_idle = is_idle;
+#else
     if (is_idle) {
         // Start idle motion
         ESP_LOGW(TAG, "Start idle motion");
@@ -562,6 +577,7 @@ void StackChanAvatarDisplay::SetStatus(const char* status)
         _is_xiaozhi_idle = false;
     }
 
+#endif
     // Clear sleep state
     if (is_sleeping_) {
         avatar.setSpeech("");

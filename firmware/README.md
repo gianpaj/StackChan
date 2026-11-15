@@ -3,6 +3,11 @@
 
 ### Fetch Dependencies
 
+Run these commands from `firmware/`. `repos.json` pins Git dependencies to
+full commit IDs. The bootstrap reuses local commits and checks that the Xiaozhi
+patch applies or is already applied. Conflicting dependency changes stop it.
+Keep `dependencies.lock` to preserve the ESP-IDF component versions.
+
 ```bash
 python3 ./fetch_repos.py
 ```
@@ -32,3 +37,8 @@ ctest --test-dir build-host-tests --output-on-failure
 ```bash
 idf.py flash
 ```
+
+### Local speech profile
+
+See [Local Ito speech](LOCAL_ITO.md) for the on-device USB speech build, commands
+and storage layout.

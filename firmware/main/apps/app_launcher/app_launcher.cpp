@@ -8,6 +8,7 @@
 #include <mooncake.h>
 #include <mooncake_log.h>
 #include <stackchan/stackchan.h>
+#include <apps/common/common.h>
 #include <cstdint>
 
 using namespace mooncake;
@@ -26,12 +27,19 @@ void AppLauncher::onLauncherOpen()
 
     LvglLockGuard lock;
 
-    if (!_startup_checked && !GetHAL().isAppConfiged()) {
+#ifdef CONFIG_STACKCHAN_LOCAL_ITO
+    create_launcher_view();
+#else
+    if (!_startup_checked && GetHAL().consumeAppSetupRequest()) {
+        mclog::tagInfo(getAppInfo().name, "resume App setup after network/binding failure");
+        _startup_worker = std::make_unique<setup_workers::WifiSetupWorker>();
+    } else if (!_startup_checked && !GetHAL().isAppConfiged()) {
         mclog::tagInfo(getAppInfo().name, "app not configured, start startup worker");
         _startup_worker = std::make_unique<setup_workers::StartupWorker>();
     } else {
         create_launcher_view();
     }
+#endif
 }
 
 void AppLauncher::onLauncherRunning()
@@ -72,6 +80,13 @@ void AppLauncher::create_launcher_view()
     _view = std::make_unique<view::LauncherView>();
     _view->init(getAppProps());
     _view->onAppClicked = [&](int appID) {
+#if CONFIG_STACKCHAN_LOCAL_ITO
+        const auto name = GetMooncake().getAppInfo(appID).name;
+        if (name != "AI.AGENT" && name != "AVATAR" && name != "SETUP") {
+            view::pop_a_toast("Unavailable in local speech mode", view::ToastType::Warning);
+            return;
+        }
+#endif
         mclog::tagInfo(getAppInfo().name, "handle open app, app id: {}", appID);
         openApp(appID);
     };

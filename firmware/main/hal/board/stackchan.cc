@@ -17,14 +17,65 @@
 #include <esp_lcd_ili9341.h>
 #include <esp_timer.h>
 #include <algorithm>
+#include <mutex>
 #include "stackchan_camera.h"
 #include "hal_bridge.h"
+#include <hal/hal.h>
 
 #define TAG "M5Stack-StackChan-Board"
 
 #define XPOWERS_AXP2101_ICC_CHG_SET (0x62)
 
+namespace {
+
+struct LcdInitCommand {
+    uint8_t command;
+    uint8_t data[15];
+    uint8_t data_size;
+    uint16_t delay_ms;
+};
+
+constexpr LcdInitCommand kIli9342eInitCommands[] = {
+    {0xDD, {0x01}, 1, 0},
+    {0x3A, {0x55}, 1, 0},
+    {0x21, {}, 0, 0},
+    {0x36, {0x08}, 1, 0},
+    {0xD5, {0x00}, 1, 0},
+    {0xB1, {0x22}, 1, 0},
+    {0xC8, {0x38}, 1, 0},
+    {0xCB, {0x1C}, 1, 0},
+    {0xC9, {0x1A}, 1, 0},
+    {0xCA, {0x1A}, 1, 0},
+    {0xB7, {0x5A, 0x41, 0x11, 0x19}, 4, 0},
+    {0xE4, {0x04, 0x08, 0x11, 0x06, 0x12, 0x07, 0x3A, 0x76, 0x47, 0x07, 0x0F, 0x0A, 0x11, 0x19, 0x05}, 15, 0},
+    {0xE5, {0x02, 0x03, 0x07, 0x06, 0x12, 0x07, 0x36, 0x5F, 0x48, 0x06, 0x10, 0x0C, 0x16, 0x14, 0x09}, 15, 0},
+    {0x11, {}, 0, 120},
+    {0x29, {}, 0, 120},
+};
+
+esp_err_t ApplyIli9342eInit(esp_lcd_panel_io_handle_t panel_io)
+{
+    for (const auto& init_command : kIli9342eInitCommands) {
+        const void* data = init_command.data_size == 0 ? nullptr : init_command.data;
+        esp_err_t err    = esp_lcd_panel_io_tx_param(panel_io, init_command.command, data, init_command.data_size);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "ILI9342E command 0x%02X failed: %s", init_command.command, esp_err_to_name(err));
+            return err;
+        }
+        if (init_command.delay_ms != 0) {
+            vTaskDelay(pdMS_TO_TICKS(init_command.delay_ms));
+        }
+    }
+    return ESP_OK;
+}
+
+}  // namespace
+
 class Pmic : public Axp2101 {
+#if CONFIG_STACKCHAN_LOCAL_ITO
+    std::mutex power_rail_mutex_;
+    bool microphone_power_enabled_ = false;
+#endif
 public:
     /**
      * @brief axp2101 charge currnet voltage parameters.
@@ -51,12 +102,12 @@ public:
     {
         uint8_t data = ReadReg(0x90);
         data |= 0b10110100;
-        WriteReg(0x90, data);
+        WritePowerEnable(data);
         // WriteReg(0x99, (0b11110 - 5));
         WriteReg(0x97, (0b11110 - 2));
         WriteReg(0x69, 0b00110101);
         WriteReg(0x30, 0b111111);
-        WriteReg(0x90, 0xBF);
+        WritePowerEnable(0xBF);
         WriteReg(0x94, 33 - 5);
         WriteReg(0x95, 33 - 5);
         WriteReg(0x27, 0x00);
@@ -71,12 +122,54 @@ public:
         SetBrightness(0);
     }
 
+    void WritePowerEnable(uint8_t value)
+    {
+#if CONFIG_STACKCHAN_LOCAL_ITO
+        std::lock_guard<std::mutex> lock(power_rail_mutex_);
+        // ALDO2 is enabled only for the explicit capture interval.
+        value = (value & ~0x02) | (microphone_power_enabled_ ? 0x02 : 0);
+#endif
+        WriteReg(0x90, value);
+#if CONFIG_STACKCHAN_LOCAL_ITO
+        uint8_t readback = 0;
+        ESP_ERROR_CHECK(TryReadRegs(0x90, &readback, sizeof(readback)));
+        ESP_ERROR_CHECK(readback == value ? ESP_OK : ESP_ERR_INVALID_STATE);
+#endif
+    }
+
+#if CONFIG_STACKCHAN_LOCAL_ITO
+    bool SetMicrophonePower(bool enabled)
+    {
+        std::lock_guard<std::mutex> lock(power_rail_mutex_);
+        if (!enabled) {
+            microphone_power_enabled_ = false;
+        }
+        uint8_t current = 0;
+        if (TryReadRegs(0x90, &current, 1) != ESP_OK) {
+            return false;
+        }
+        const uint8_t wanted = (current & ~0x02) | (enabled ? 0x02 : 0);
+        const uint8_t command[] = {0x90, wanted};
+        uint8_t readback = 0;
+        if (i2c_master_transmit(i2c_device_, command, sizeof(command), 100) != ESP_OK ||
+            TryReadRegs(0x90, &readback, 1) != ESP_OK || readback != wanted) {
+            microphone_power_enabled_ = false;
+            const uint8_t power_off[] = {0x90, static_cast<uint8_t>(current & ~0x02)};
+            i2c_master_transmit(i2c_device_, power_off, sizeof(power_off), 100);
+            ESP_LOGE(TAG, "Microphone power update failed");
+            return false;
+        }
+        microphone_power_enabled_ = enabled;
+        return true;
+    }
+#endif
+
     void SetBrightness(uint8_t brightness)
     {
         if (brightness == 0) {
             // DLDO1 off
             uint8_t val = ReadReg(0x90);
-            WriteReg(0x90, val & 0x7F);
+            WritePowerEnable(val & 0x7F);
         } else {
             // 映射计算：将 1~100 映射到 寄存器值 20~28
             // 公式：MinReg + (input * (MaxReg - MinReg) / MaxInput)
@@ -90,7 +183,7 @@ public:
             // Make sure DLDO1 on
             uint8_t val = ReadReg(0x90);
             if (!(val & 0x80)) {
-                WriteReg(0x90, val | 0x80);
+                WritePowerEnable(val | 0x80);
             }
         }
     }
@@ -114,15 +207,41 @@ public:
         return true;
     }
 
-    bool IsExternalPowerConnected()
+    esp_err_t TryReadPowerStatus(bool& has_external_power, bool& charging, bool& discharging)
     {
-        const uint8_t power_status      = ReadReg(0x01);
+        uint8_t power_status = 0;
+        esp_err_t err        = TryReadRegs(0x01, &power_status, 1);
+        if (err != ESP_OK) {
+            return err;
+        }
+
         const uint8_t current_direction = (power_status & 0b01100000) >> 5;
-        const bool is_charging_done     = (power_status & 0b00000111) == 0b00000100;
+        if (current_direction == 3) {
+            return ESP_ERR_INVALID_RESPONSE;
+        }
+        const bool is_charging_done = (power_status & 0b00000111) == 0b00000100;
 
         // Treat any non-discharging state as externally powered so a plugged-in cable
         // still counts even after the battery is full.
-        return current_direction != 2 || is_charging_done;
+        has_external_power = current_direction != 2 || is_charging_done;
+        charging           = current_direction == 1;
+        discharging        = current_direction == 2;
+        return ESP_OK;
+    }
+
+    esp_err_t TryReadBatteryLevel(int& level)
+    {
+        uint8_t battery_level = 0;
+        esp_err_t err         = TryReadRegs(0xA4, &battery_level, 1);
+        if (err != ESP_OK) {
+            return err;
+        }
+        if (battery_level > 100) {
+            return ESP_ERR_INVALID_RESPONSE;
+        }
+
+        level = battery_level;
+        return ESP_OK;
     }
 };
 
@@ -177,6 +296,12 @@ public:
 
 class Ft6336 : public I2cDevice {
 public:
+    struct ControllerVersion {
+        uint8_t cipher  = 0;
+        uint8_t firm_id = 0;
+        uint8_t vendor  = 0;
+    };
+
     struct TouchPoint_t {
         int num = 0;
         int x   = -1;
@@ -185,14 +310,40 @@ public:
 
     Ft6336(i2c_master_bus_handle_t i2c_bus, uint8_t addr) : I2cDevice(i2c_bus, addr)
     {
-        uint8_t chip_id = ReadReg(0xA3);
-        ESP_LOGI(TAG, "Get chip ID: 0x%02X", chip_id);
         read_buffer_ = new uint8_t[6];
     }
 
     ~Ft6336()
     {
         delete[] read_buffer_;
+    }
+
+    bool ReadControllerVersion(ControllerVersion& version)
+    {
+        constexpr int kMaxAttempts  = 5;
+        constexpr int kRetryDelayMs = 20;
+
+        version = {};
+        for (int attempt = 0; attempt < kMaxAttempts; ++attempt) {
+            const uint8_t work_mode[] = {0x00, 0x00};
+            uint8_t info[6]           = {};
+            esp_err_t err             = i2c_master_transmit(i2c_device_, work_mode, sizeof(work_mode), 100);
+            if (err == ESP_OK) {
+                err = TryReadRegs(0xA3, info, sizeof(info));
+            }
+
+            if (err == ESP_OK && info[0] != 0 && info[5] != 0) {
+                version.cipher  = info[0];
+                version.firm_id = info[3];
+                version.vendor  = info[5];
+                return true;
+            }
+
+            if (attempt + 1 < kMaxAttempts) {
+                vTaskDelay(pdMS_TO_TICKS(kRetryDelayMs));
+            }
+        }
+        return false;
     }
 
     bool UpdateTouchPoint()
@@ -232,30 +383,55 @@ private:
     uint32_t consecutive_failures_ = 0;
 };
 
-class M5StackCoreS3Board : public WifiBoard {
+#if CONFIG_STACKCHAN_LOCAL_ITO
+using StackChanBoardBase = Board;
+#else
+using StackChanBoardBase = WifiBoard;
+#endif
+
+class M5StackCoreS3Board : public StackChanBoardBase {
 private:
-    static constexpr int kPowerSaveSleepDelaySeconds = 300;
-    static constexpr int kPowerStatePollIntervalMs   = 1000;
+    static constexpr int kPowerSaveSleepDelaySeconds  = 300;
+    static constexpr int kPowerStatePollIntervalMs    = 1000;
+    static constexpr int kPowerReadErrorLogIntervalMs = 10000;
+
+    struct PowerState {
+        bool has_external_power  = false;
+        bool charging            = false;
+        bool discharging         = false;
+        int battery_level        = 0;
+        bool status_valid        = false;
+        bool battery_level_valid = false;
+    };
 
     i2c_master_bus_handle_t i2c_bus_;
     Pmic* pmic_;
     Aw9523* aw9523_;
     Ft6336* ft6336_;
     LvglDisplay* display_;
-    StackChanCamera* camera_;
-    esp_timer_handle_t touchpad_timer_;
-    PowerSaveTimer* power_save_timer_;
+    StackChanCamera* camera_ = nullptr;
+    esp_timer_handle_t board_poll_timer_;
+    PowerSaveTimer* power_save_timer_ = nullptr;
     hal_bridge::XiaozhiConfig_t xiaozhi_config_;
-    bool last_power_save_enabled_      = false;
-    int64_t last_power_state_check_ms_ = 0;
+    std::mutex power_state_mutex_;
+    PowerState power_state_;
+    bool last_power_save_enabled_             = false;
+    int64_t last_power_state_check_ms_        = 0;
+    int64_t last_power_error_log_ms_          = 0;
+    uint32_t consecutive_power_read_failures_ = 0;
 
     bool ShouldEnablePowerSave(bool has_external_power, bool is_discharging) const
     {
+#if CONFIG_STACKCHAN_LOCAL_ITO
+        return false;
+#else
         return is_discharging || (has_external_power && xiaozhi_config_.allowShutdownWhenCharging);
+#endif
     }
 
     void UpdatePowerSaveEnabled(bool has_external_power, bool is_discharging)
     {
+#if !CONFIG_STACKCHAN_LOCAL_ITO
         const bool should_enable_power_save = ShouldEnablePowerSave(has_external_power, is_discharging);
         if (should_enable_power_save == last_power_save_enabled_) {
             return;
@@ -266,6 +442,54 @@ private:
                  xiaozhi_config_.allowShutdownWhenCharging);
         power_save_timer_->SetEnabled(should_enable_power_save);
         last_power_save_enabled_ = should_enable_power_save;
+#endif
+    }
+
+    void RefreshPowerState()
+    {
+        bool has_external_power = false;
+        bool charging           = false;
+        bool discharging        = false;
+        int battery_level       = 0;
+        esp_err_t status_err    = pmic_->TryReadPowerStatus(has_external_power, charging, discharging);
+        esp_err_t level_err     = pmic_->TryReadBatteryLevel(battery_level);
+
+        {
+            std::lock_guard<std::mutex> lock(power_state_mutex_);
+            if (status_err == ESP_OK) {
+                power_state_.has_external_power = has_external_power;
+                power_state_.charging           = charging;
+                power_state_.discharging        = discharging;
+                power_state_.status_valid       = true;
+            }
+            if (level_err == ESP_OK) {
+                power_state_.battery_level       = battery_level;
+                power_state_.battery_level_valid = true;
+            }
+        }
+
+        if (status_err == ESP_OK) {
+            UpdatePowerSaveEnabled(has_external_power, discharging);
+        }
+
+        if (status_err != ESP_OK || level_err != ESP_OK) {
+            consecutive_power_read_failures_++;
+            const int64_t now_ms = esp_timer_get_time() / 1000;
+            if (last_power_error_log_ms_ == 0 || (now_ms - last_power_error_log_ms_) >= kPowerReadErrorLogIntervalMs) {
+                ESP_LOGW(TAG, "AXP2101 read failed: status=%s, level=%s; keeping previous values (%lu failure(s))",
+                         esp_err_to_name(status_err), esp_err_to_name(level_err),
+                         static_cast<unsigned long>(consecutive_power_read_failures_));
+                last_power_error_log_ms_ = now_ms;
+            }
+            return;
+        }
+
+        if (consecutive_power_read_failures_ != 0) {
+            ESP_LOGI(TAG, "AXP2101 reads recovered after %lu failure(s)",
+                     static_cast<unsigned long>(consecutive_power_read_failures_));
+            consecutive_power_read_failures_ = 0;
+            last_power_error_log_ms_         = 0;
+        }
     }
 
     void PollPowerSaveState()
@@ -275,8 +499,7 @@ private:
             return;
         }
         last_power_state_check_ms_ = now_ms;
-
-        UpdatePowerSaveEnabled(pmic_->IsExternalPowerConnected(), pmic_->IsDischarging());
+        RefreshPowerState();
     }
 
     void InitializePowerSaveTimer()
@@ -303,7 +526,7 @@ private:
             GetBacklight()->RestoreBrightness();
         });
         power_save_timer_->OnShutdownRequest([this]() { pmic_->PowerOff(); });
-        UpdatePowerSaveEnabled(pmic_->IsExternalPowerConnected(), pmic_->IsDischarging());
+        RefreshPowerState();
     }
 
     void InitializeI2c()
@@ -371,27 +594,39 @@ private:
         hal_bridge::set_touch_point(touch_point.num, touch_point.x, touch_point.y);
     }
 
-    void InitializeFt6336TouchPad()
+    void InitializeFt6336()
     {
         ESP_LOGI(TAG, "Init FT6336");
         ft6336_ = new Ft6336(i2c_bus_, 0x38);
+    }
 
-        // 创建定时器，20ms 间隔
+    void StartBoardPollTimer()
+    {
         esp_timer_create_args_t timer_args = {
             .callback =
                 [](void* arg) {
                     M5StackCoreS3Board* board = (M5StackCoreS3Board*)arg;
+#if !CONFIG_STACKCHAN_LOCAL_ITO
                     board->PollTouchpad();
+#endif
                     board->PollPowerSaveState();
                 },
             .arg                   = this,
             .dispatch_method       = ESP_TIMER_TASK,
+#if CONFIG_STACKCHAN_LOCAL_ITO
+            .name                  = "power_poll_timer",
+#else
             .name                  = "touchpad_timer",
+#endif
             .skip_unhandled_events = true,
         };
 
-        ESP_ERROR_CHECK(esp_timer_create(&timer_args, &touchpad_timer_));
-        ESP_ERROR_CHECK(esp_timer_start_periodic(touchpad_timer_, 20 * 1000));
+        ESP_ERROR_CHECK(esp_timer_create(&timer_args, &board_poll_timer_));
+#if CONFIG_STACKCHAN_LOCAL_ITO
+        ESP_ERROR_CHECK(esp_timer_start_periodic(board_poll_timer_, kPowerStatePollIntervalMs * 1000));
+#else
+        ESP_ERROR_CHECK(esp_timer_start_periodic(board_poll_timer_, 20 * 1000));
+#endif
     }
 
     void InitializeSpi()
@@ -435,6 +670,22 @@ private:
         aw9523_->ResetIli9342();
 
         esp_lcd_panel_init(panel);
+
+        Ft6336::ControllerVersion touch_version;
+        const bool touch_version_valid = ft6336_->ReadControllerVersion(touch_version);
+        const bool is_ili9342e = touch_version_valid && touch_version.firm_id == 0x12 && touch_version.vendor == 0x11;
+        if (touch_version_valid) {
+            ESP_LOGI(TAG, "CIPHER:0x%02X / FIRMID:0x%02X / VENDID:0x%02X, panel:%s", touch_version.cipher,
+                     touch_version.firm_id, touch_version.vendor, is_ili9342e ? "ILI9342E" : "ILI9342C");
+        } else {
+            ESP_LOGW(TAG, "FT6336 version read failed, panel:ILI9342C");
+        }
+
+        if (is_ili9342e) {
+            ESP_LOGI(TAG, "Apply ILI9342E panel initialization");
+            ESP_ERROR_CHECK(ApplyIli9342eInit(panel_io));
+        }
+
         esp_lcd_panel_invert_color(panel, true);
         esp_lcd_panel_swap_xy(panel, DISPLAY_SWAP_XY);
         esp_lcd_panel_mirror(panel, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
@@ -491,19 +742,48 @@ private:
     }
 
 public:
+#if CONFIG_STACKCHAN_LOCAL_ITO
+    bool SetMicrophonePower(bool enabled) { return pmic_->SetMicrophonePower(enabled); }
+#endif
+
     M5StackCoreS3Board()
     {
         InitializeI2c();
         InitializeAxp2101();
+#if CONFIG_STACKCHAN_LOCAL_ITO
+        RefreshPowerState();
+#else
         InitializePowerSaveTimer();
+#endif
         InitializeAw9523();
         I2cDetect();
+        InitializeFt6336();
         InitializeSpi();
         InitializeIli9342Display();
+#if !CONFIG_STACKCHAN_LOCAL_ITO
         InitializeCamera();
-        InitializeFt6336TouchPad();
+#endif
+        StartBoardPollTimer();
         GetBacklight()->RestoreBrightness();
     }
+
+#if CONFIG_STACKCHAN_LOCAL_ITO
+    std::string GetBoardType() override { return "local-ito"; }
+    NetworkInterface* GetNetwork() override { return nullptr; }
+    void StartNetwork() override {}
+    const char* GetNetworkStateIcon() override { return ""; }
+    std::string GetBoardJson() override { return R"({"type":"local-ito"})"; }
+    std::string GetDeviceStatusJson() override { return R"({"network":{"type":"offline"}})"; }
+#else
+    // All fallback paths (no saved SSID, timeout, explicit reconfiguration) use
+    // the same BLE App setup flow. Never start the upstream configuration AP.
+    void StartWifiConfigMode() override
+    {
+        ESP_LOGW(TAG, "WiFi setup required; opening StackChan App setup");
+        GetHAL().requestAppSetup();
+    }
+
+#endif
 
     virtual AudioCodec* GetAudioCodec() override
     {
@@ -526,24 +806,25 @@ public:
 
     virtual bool GetBatteryLevel(int& level, bool& charging, bool& discharging) override
     {
-        static bool last_discharging = false;
-        charging                     = pmic_->IsCharging();
-        discharging                  = pmic_->IsDischarging();
-        if (discharging != last_discharging) {
-            power_save_timer_->SetEnabled(discharging);
-            last_discharging = discharging;
+        std::lock_guard<std::mutex> lock(power_state_mutex_);
+        if (!power_state_.status_valid || !power_state_.battery_level_valid) {
+            return false;
         }
 
-        level = pmic_->GetBatteryLevel();
+        level       = power_state_.battery_level;
+        charging    = power_state_.charging;
+        discharging = power_state_.discharging;
         return true;
     }
 
     virtual void SetPowerSaveLevel(PowerSaveLevel level) override
     {
+#if !CONFIG_STACKCHAN_LOCAL_ITO
         if (level != PowerSaveLevel::LOW_POWER) {
             power_save_timer_->WakeUp();
         }
         WifiBoard::SetPowerSaveLevel(level);
+#endif
     }
 
     virtual Backlight* GetBacklight() override
@@ -565,6 +846,14 @@ i2c_master_bus_handle_t hal_bridge::board_get_i2c_bus()
     auto& board = (M5StackCoreS3Board&)Board::GetInstance();
     return board.GetI2cBus();
 }
+
+#if CONFIG_STACKCHAN_LOCAL_ITO
+bool hal_bridge::board_set_microphone_power(bool enabled)
+{
+    auto& board = static_cast<M5StackCoreS3Board&>(Board::GetInstance());
+    return board.SetMicrophonePower(enabled);
+}
+#endif
 
 StackChanCamera* hal_bridge::board_get_camera()
 {
@@ -652,10 +941,12 @@ uint8_t hal_bridge::board_get_speaker_volume()
 
 void hal_bridge::toggle_xiaozhi_chat_state()
 {
+#if !CONFIG_STACKCHAN_LOCAL_ITO
     auto& app = Application::GetInstance();
     if (app.GetDeviceState() == kDeviceStateStarting) {
         // EnterWifiConfigMode();
         return;
     }
     app.ToggleChatState();
+#endif
 }

@@ -1,0 +1,136 @@
+diff --git a/esp32/components/tinyasr/kernels.c b/esp32/components/tinyasr/kernels.c
+index 970b52e..be7c1cf 100644
+--- a/esp32/components/tinyasr/kernels.c
++++ b/esp32/components/tinyasr/kernels.c
+@@ -15,6 +15,8 @@
+ #define TASR_PIE 1
+ #endif
+
++typedef struct { uint32_t autoload; int active; } wpf_t;
++
+ #define WPF_BLK 16384  // bytes of weights fetched ahead per block
+ #ifdef TASR_PIE
+ // Weight preload: the ESP32-S3 D-cache has a ROM-driven manual preload engine that runs in the background (it reads
+@@ -32,21 +34,21 @@ static inline int wpf_ext(const void *p)
+     const uintptr_t a = (uintptr_t)p;
+     return a >= 0x3C000000u && a < 0x3E000000u;  // external memory (PSRAM, flash) on the data bus
+ }
+-static inline void wpf_start(const void *p, size_t n, int *busy)
++static inline void wpf_start(const void *p, size_t n, wpf_t *busy)
+ {
+     if (!tasr_wpf || !n || !wpf_ext(p)) return;
+     const uintptr_t a = (uintptr_t)p & ~(uintptr_t)63;
+     size_t sz = (((uintptr_t)p + n + 63) & ~(uintptr_t)63) - a;
+     if (sz > 32768) sz = 32768;
+-    Cache_Start_DCache_Preload((uint32_t)a, (uint32_t)sz, 0);
+-    *busy = 1;
++    busy->autoload = Cache_Start_DCache_Preload((uint32_t)a, (uint32_t)sz, 0);
++    busy->active = 1;
+ }
+-static inline void wpf_wait(int *busy)
++static inline void wpf_wait(wpf_t *busy)
+ {
+-    if (!*busy) return;
++    if (!busy->active) return;
+     while (!Cache_DCache_Preload_Done()) {}
+-    Cache_End_DCache_Preload(0);
+-    *busy = 0;
++    Cache_End_DCache_Preload(busy->autoload);
++    busy->active = 0;
+ }
+ #else
+ int tasr_wpf = 0;
+@@ -357,7 +359,8 @@ void tasr_qlin_range(const tasr_qlin_t *L, const int8_t *xq, const float *xs, in
+         const int per = tb >= WPF_BLK ? 1 : (int)(WPF_BLK / tb);
+         const uint8_t *w0 = (const uint8_t *)L->w + (size_t)n0 * (kp >> 1);
+         const size_t total = (size_t)((n1 - n0) / 16) * tb;
+-        int busy = 0, ti = 0;
++        wpf_t busy = {0};
++        int ti = 0;
+         wpf_start(w0, total < per * tb ? total : per * tb, &busy);
+         for (int nb = n0; nb < n1; nb += 16, ti++) {
+             if (ti % per == 0) {
+@@ -392,7 +395,8 @@ void tasr_qlin_range(const tasr_qlin_t *L, const int8_t *xq, const float *xs, in
+         const int per = tb >= WPF_BLK ? 1 : (int)(WPF_BLK / tb);
+         const int8_t *w0 = L->w + (size_t)n0 * kp;
+         const size_t total = (size_t)(n1 - n0) * kp;
+-        int busy = 0, ti = 0;
++        wpf_t busy = {0};
++        int ti = 0;
+         wpf_start(w0, total < per * tb ? total : per * tb, &busy);
+         for (int nb0 = n0; nb0 < n1; nb0 += 16, ti++) {
+             if (ti % per == 0) {
+@@ -459,7 +463,7 @@ void tasr_qlin_range(const tasr_qlin_t *L, const int8_t *xq, const float *xs, in
+         const int tn = T - t0 < tb ? T - t0 : tb;
+         const uint8_t *w0 = (const uint8_t *)L->w + (size_t)n0 * rb;
+         const size_t total = (size_t)(n1 - n0) * rb;
+-        int busy = 0;
++        wpf_t busy = {0};
+         wpf_start(w0, total < per * rb ? total : per * rb, &busy);
+         for (int n = n0; n < n1; n++) {
+             if ((n - n0) % per == 0) {
+diff --git a/esp32/components/tinyasr/tasr_nemo.c b/esp32/components/tinyasr/tasr_nemo.c
+index 9df1ca7..2228cb4 100644
+--- a/esp32/components/tinyasr/tasr_nemo.c
++++ b/esp32/components/tinyasr/tasr_nemo.c
+@@ -117,6 +117,7 @@ tasr_nemo_t *tasr_nemo_load(const uint8_t *blob, size_t size)
+     uint32_t hd[15];
+     memcpy(hd, blob + 4, sizeof(hd));
+     tasr_nemo_t *m = (tasr_nemo_t *)tasr_alloc(sizeof(tasr_nemo_t), 1);
++    if (!m) return NULL;
+     m->d = hd[1]; m->h = hd[2]; m->ff = hd[3]; m->k = hd[4]; m->nl = hd[5]; m->sc = hd[6]; m->V = hd[7];
+     const int bits = hd[8];
+     m->flags = hd[10]; m->s_chunk = hd[11]; m->s_left = hd[12];
+@@ -140,6 +141,7 @@ tasr_nemo_t *tasr_nemo_load(const uint8_t *blob, size_t size)
+         tot += m->mel_len[j];
+     }
+     m->mel_w = (float *)tasr_alloc(sizeof(float) * (tot + 1), 1);
++    if (!m->mel_w) { tasr_nemo_free(m); return NULL; }
+     for (int j = 0, o = 0; j < NMEL; j++)
+         for (int b = 0; b < m->mel_len[j]; b++) m->mel_w[o++] = fb[(m->mel_start[j] + b) * NMEL + j];
+     m->c0_w = nf32(&c, m->sc * 9, &acc);
+@@ -148,6 +150,7 @@ tasr_nemo_t *tasr_nemo_load(const uint8_t *blob, size_t size)
+     m->sub = nload_qlin(&c, d, m->sc * m->f2, 8, &acc);
+     if (m->stack == 2) m->stk = nload_qlin(&c, d, 2 * d, 8, &acc);
+     m->L = (nlayer_t *)tasr_alloc(sizeof(nlayer_t) * m->nl, 1);
++    if (!m->L) { tasr_nemo_free(m); return NULL; }
+     for (int i = 0; i < m->nl; i++) {
+         nlayer_t *L = &m->L[i];
+         L->n_ff1 = nln(&c, d, &acc);
+@@ -169,6 +172,7 @@ tasr_nemo_t *tasr_nemo_load(const uint8_t *blob, size_t size)
+         L->ff2_2 = nload_qlin(&c, d, m->ff, bits, &acc);
+         L->n_out = nln(&c, d, &acc);
+         float *wt = (float *)tasr_alloc(sizeof(float) * m->k * d, 0);
++        if (!wt) { tasr_nemo_free(m); return NULL; }
+         for (int ch = 0; ch < d; ch++)
+             for (int j = 0; j < m->k; j++) wt[j * d + ch] = L->dw_w[ch * m->k + j];
+         L->dw_wt = wt;
+@@ -188,6 +192,7 @@ tasr_nemo_t *tasr_nemo_load(const uint8_t *blob, size_t size)
+     nalign(&c);
+     m->tok = (const char **)tasr_alloc(sizeof(char *) * m->V, 1);
+     m->tok_len = (uint8_t *)tasr_alloc(m->V, 1);
++    if (!m->tok || !m->tok_len) { tasr_nemo_free(m); return NULL; }
+     for (int i = 0; i < m->V; i++) {
+         m->tok_len[i] = *c.p++;
+         m->tok[i] = (const char *)c.p;
+@@ -1750,10 +1755,19 @@ tasr_nemo_stream_t *tasr_nemo_stream_new(const tasr_nemo_t *m, int chunk, int le
+     }
+     s->lg = (float *)tasr_alloc(sizeof(float) * s->C * (m->V + 1), 0);
+     s->lp = (float *)tasr_alloc(sizeof(float) * (m->V + 1), 0);
+-    if (!s->p8 || !s->k8 || !s->vt || !s->gh || !s->h2 || !s->lg || !s->W.xq) { tasr_nemo_stream_free(s); return NULL; }
++    if (!s->p8 || !s->sp || !s->k8 || !s->sk || !s->vt || !s->sv || !s->gh || !s->mel ||
++        !s->c0ring || !s->cmaxr || !s->cmw || !s->col || !s->c2out || !s->fr || !s->xq_sub ||
++        !s->xs_sub || !s->x || (m->stack == 2 && !s->x2) || !s->W.xq || !s->W.xs ||
++        !s->hb || !s->h2 || !s->att || !s->prow || !s->qu || !s->qv || !s->squ || !s->sqv ||
++        !s->lg || !s->lp) { tasr_nemo_stream_free(s); return NULL; }
++    for (int w = 0; w < NW; w++)
++        if (!s->W.wtmp[w] || !s->W.acc[w] || !s->scb[w] || !s->pq[w] || !s->ia[w]) {
++            tasr_nemo_stream_free(s); return NULL;
++        }
+     // positional rows for offsets OMAX..-(C-1), int8 once, then every layer's linear_pos per head
+     const int kpp = m->L[0].pos.kp;
+     float *pe = (float *)tasr_alloc(sizeof(float) * RB * d, 0);
++    if (!pe) { tasr_nemo_stream_free(s); return NULL; }
+     for (int r0 = 0; r0 < s->NP; r0 += wrows) {
+         const int rn = s->NP - r0 < wrows ? s->NP - r0 : wrows;
+         for (int r = 0; r < rn; r++) {

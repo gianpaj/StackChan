@@ -19,6 +19,13 @@ set(STACK_CHAN_INCLUDE_DIRS
     "."
 )
 list(APPEND STACK_CHAN_SOURCES main.cpp)
+if(CONFIG_STACKCHAN_LOCAL_ITO)
+    list(FILTER STACK_CHAN_SOURCES EXCLUDE REGEX "/apps/|hal/hal_(ble|servo|mcp)\\.cpp$|hal/utils/bleprph/")
+    list(APPEND STACK_CHAN_SOURCES local_ito.cpp)
+    if(CONFIG_STACKCHAN_CONVERSATION)
+        list(APPEND STACK_CHAN_SOURCES conversation/controller.cpp conversation/oido_recognizer.cc)
+    endif()
+endif()
 
 # Define source files
 set(SOURCES "audio/audio_codec.cc"
@@ -289,7 +296,13 @@ if(CONFIG_IDF_TARGET_ESP32S3)
     list(APPEND SOURCES "${XIAOZHI_MAIN_DIR}/boards/common/esp32_camera.cc")
 endif()
 
+set(LOCAL_SPEECH_LINKER_FRAGMENTS)
+if(CONFIG_STACKCHAN_CONVERSATION)
+    list(APPEND LOCAL_SPEECH_LINKER_FRAGMENTS conversation/oido.lf)
+endif()
+
 idf_component_register(SRCS ${SOURCES}
+                    LDFRAGMENTS ${LOCAL_SPEECH_LINKER_FRAGMENTS}
                     EMBED_FILES ${LANG_SOUNDS} ${COMMON_SOUNDS}
                     INCLUDE_DIRS ${INCLUDE_DIRS}
                     WHOLE_ARCHIVE
@@ -297,6 +310,9 @@ idf_component_register(SRCS ${SOURCES}
                         esp_pm
                         esp_psram
                         esp_netif
+                        esp_http_client
+                        mbedtls
+                        json
                         esp_driver_gpio
                         esp_driver_uart
                         esp_driver_spi
@@ -317,6 +333,17 @@ idf_component_register(SRCS ${SOURCES}
                         mooncake_log
                         smooth_ui_toolkit
                     )
+
+# CONFIG values are available after IDF's requirement expansion pass.
+if(STACKCHAN_LOCAL_ITO AND NOT CONFIG_STACKCHAN_LOCAL_ITO)
+    message(FATAL_ERROR "Local speech requires CONFIG_STACKCHAN_LOCAL_ITO=y in sdkconfig.ito")
+endif()
+if(CONFIG_STACKCHAN_LOCAL_ITO)
+    target_link_libraries(${COMPONENT_LIB} PRIVATE idf::runtime)
+    if(CONFIG_STACKCHAN_CONVERSATION)
+        target_link_libraries(${COMPONENT_LIB} PRIVATE idf::tinyasr idf::esp_driver_usb_serial_jtag)
+    endif()
+endif()
 
 # Use target_compile_definitions to define BOARD_TYPE, BOARD_NAME
 # If BOARD_NAME is empty, use BOARD_TYPE
