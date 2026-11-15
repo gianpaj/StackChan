@@ -66,7 +66,8 @@ USB is the local profile's control interface. The display keeps the original
 breathing, blinking and speaking animation. Hardware reset returns to the face
 and USB speech startup.
 
-`memory` reports free, largest and lifetime-minimum internal/PSRAM heap bytes.
+`memory` reports free, largest and lifetime-minimum internal/PSRAM heap bytes,
+plus unused space in the 8 KiB internal USB control stack.
 `tts stop` cancels playback, closes the mouth and parks inference workers before
 returning inference buffers to the PSRAM heap. Wait for `OK tts stop` before
 using the released memory. A timeout retains ownership; retry stop to finish.

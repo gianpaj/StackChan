@@ -177,11 +177,15 @@ the shared service lifecycle. `tts probe` temporarily borrows the reserved hot
 workspace and checks a separate 3 MiB PSRAM allocation. It exercises ownership
 without adding STT or changing flash storage.
 
-The [service header](https://github.com/gianpaj/ito/blob/d41d3996eb75f2f3b4d819b073ba35ab448bac92/esp32/runtime/itofs_service.h) defines
+The [service header](https://github.com/gianpaj/ito/blob/50d7d491187e0318b07603d4281705ce625ece49/esp32/runtime/itofs_service.h) defines
 resource ownership and failure behavior. The source is pinned in `repos.json`.
 The codec remains open, volume persists, and the face stays in standby during
 a handoff. Reboot remains available through USB when inference is stopped or
 parking fails. Keeping control inside Ito's console was rejected because the
 application must own transitions and diagnostics independently of admission.
 
-Integrated device handoff measurements are pending.
+The USB task has an 8 KiB internal stack because resume performs arena graph
+sizing on its caller. A 4 KiB control stack overflowed during the first resume;
+the private trace identifies `itofs_arena_bytes` and `layout`. The control
+watermark is reported with `memory`. Integrated device handoff measurements
+are pending.

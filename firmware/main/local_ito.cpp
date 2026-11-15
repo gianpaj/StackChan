@@ -17,7 +17,14 @@
 
 namespace {
 constexpr const char* tag = "local_ito";
+constexpr uint32_t control_stack_bytes = 8192;
 esp_err_t result(bool ok) { return ok ? ESP_OK : ESP_FAIL; }
+
+void report_control_stack()
+{
+    printf("CONTROL stack_free=%u of=%u bytes\n",
+           unsigned(uxTaskGetStackHighWaterMark(nullptr) * sizeof(StackType_t)), unsigned(control_stack_bytes));
+}
 
 void report_memory(const char* stage)
 {
@@ -61,6 +68,7 @@ void command(const char* line)
     esp_err_t error = ESP_OK;
     if (!std::strcmp(line, "memory")) {
         report_memory("console");
+        report_control_stack();
         printf("OK memory\n");
         return;
     }
@@ -83,6 +91,7 @@ void command(const char* line)
         if (error != ESP_OK) printf("ERROR command: %s\n", esp_err_to_name(error));
         return;
     }
+    report_control_stack();
     printf("%s %s: %s\n", error == ESP_OK ? "OK" : "ERROR", line, esp_err_to_name(error));
 }
 
@@ -150,7 +159,8 @@ void stackchan_start_local_ito()
     if (error != ESP_OK) {
         ESP_LOGE(tag, "Speech startup failed: %s; remaining in the avatar screen", esp_err_to_name(error));
     }
-    if (xTaskCreatePinnedToCore(console_task, "local_console", 4096, nullptr, 4, nullptr, 0) != pdPASS) {
+    // Resume rebuilds the arena graph on this task. Match the proven boot stack.
+    if (xTaskCreatePinnedToCore(console_task, "local_console", control_stack_bytes, nullptr, 4, nullptr, 0) != pdPASS) {
         ESP_LOGE(tag, "Cannot start the USB control task");
     }
     for (;;) {
