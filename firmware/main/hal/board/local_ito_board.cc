@@ -138,6 +138,7 @@ bool start_capture()
     }
     capture_started_us = esp_timer_get_time();
     microphone_stats.active = true;
+    Board::GetInstance().GetDisplay()->SetStatus(Lang::Strings::LISTENING);
     return true;
 }
 
@@ -172,6 +173,7 @@ bool end_capture()
     if (microphone_stats.active) {
         microphone_stats.duration_ms = (esp_timer_get_time() - capture_started_us) / 1000;
     }
+    Board::GetInstance().GetDisplay()->SetStatus(Lang::Strings::STANDBY);
     const bool ok = codec->LocalEndCapture();
     microphone_stats.active = false;
     ESP_LOGI("microphone", "samples=%u peak=%u clipped=%u elapsed_ms=%u cleanup=%d",

@@ -84,6 +84,10 @@ then finishes the transcript and restores Ito using its retained weights. To fin
 `send`. `cancel` discards an active recording or recognition. Wait for
 `CONVERSATION READY` before starting another turn.
 
+The existing LED is green while the microphone accepts audio, blue during TTS
+playback and off between those intervals. Green turns off when recording ends,
+including early submission, cancellation and capture failure.
+
 After `TRANSCRIPT turn=...`:
 
 ```text

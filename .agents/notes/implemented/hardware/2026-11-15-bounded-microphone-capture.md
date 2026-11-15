@@ -32,6 +32,13 @@ cached defaults. Capture applies 30 dB gain after enable and before unmute.
 Capture statistics report delivered samples, peak magnitude, clipped samples
 and elapsed time. PCM remains in the controller's buffer.
 
+Successful microphone startup selects the original display's LISTENING status,
+which lights the existing RGB LED green. Capture cleanup selects STANDBY and
+clears it, including cancellation and failed reads or cleanup. Failed startup
+does not announce listening. TTS keeps its existing blue SPEAKING status driven
+by actual playback. Green therefore means the microphone is accepting audio,
+not that buffered recognition is still finishing after capture ends.
+
 End disables and deletes ADC/RX resources, verifies microphone power-off and
 restores the original 24 kHz TX clock and GPIO routing. The speaker stays muted
 while its 16-bit format, amplifier enable and volume are restored. A bounded
