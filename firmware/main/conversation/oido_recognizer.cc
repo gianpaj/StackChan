@@ -234,7 +234,7 @@ esp_err_t Session::begin(const itofs_workspace_t& workspace, const Callbacks& ca
                          int chunk_frames)
 {
     if (owns_run_) return ESP_ERR_INVALID_STATE;
-    if (chunk_frames != 4 && chunk_frames != 8) return ESP_ERR_INVALID_ARG;
+    if (chunk_frames != 4 && chunk_frames != 6 && chunk_frames != 8) return ESP_ERR_INVALID_ARG;
     if (!workspace.hot || !workspace.psram || workspace.hot_bytes < kMinimumHot ||
         workspace.psram_bytes < kMinimumPsram) return ESP_ERR_NO_MEM;
     if (!valid_workspace(workspace) || touches_workspace(workspace, this, sizeof *this))

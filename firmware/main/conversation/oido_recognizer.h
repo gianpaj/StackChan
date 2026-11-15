@@ -27,7 +27,7 @@ struct Metrics {
 /* One worker owns a stopped-Ito workspace until close() returns. begin() checks
  * the complete model before capture; feed() consumes 1..320 mono 16 kHz samples
  * before returning, with a total bound of 160000 samples. Encoder chunks are
- * 4 or 8 frames, with 8 as the default and context fixed at 64. PCM and transcript
+ * 4, 6 or 8 frames, with 8 as the default and context fixed at 64. PCM and transcript
  * storage must be outside both workspace ranges. finish() needs 2048 bytes.
  *
  * The session holds the process-wide Oido allocator and parallel hooks. Another
