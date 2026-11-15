@@ -1,6 +1,6 @@
 # Agent Note: Touch-free local speech profile
 
-Status: implemented. The local image is flashed and passes serial speech checks.
+Status: implemented — The local image is flashed and passes serial speech checks.
 
 ## Problem
 
@@ -39,8 +39,8 @@ Private images, ELF/map, configuration, size report and serial results are retai
 outside the build directory. The LCD, codec ownership and inference arithmetic
 are unchanged. Native power/reset code is unchanged; physical off/on, battery
 operation and download-button behavior are not re-tested in this check.
-The user's visual/touch confirmation is pending.
+The user confirms mouth movement during speech, closure afterward and no tap response.
 
-[Local speech ownership](../../hardware/2026-11-14-local-ito-speech.md) records
+[Local speech ownership](../hardware/2026-11-14-local-ito-speech.md) records
 the codec, model, partition and safety boundaries. Shared runtime memory has its
 own lifecycle decision and measurements.

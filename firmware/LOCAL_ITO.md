@@ -50,6 +50,11 @@ text The meeting starts at half past three.
 cancel
 status
 stats
+memory
+tts stop
+tts probe
+tts resume
+text Hello again.
 ```
 
 Volume starts at 35. Zero mutes playback. Cancel stops the active text job,
@@ -60,6 +65,23 @@ printed by the monitor. Ctrl-C closes the monitor and releases the USB port.
 USB is the local profile's control interface. The display keeps the original
 breathing, blinking and speaking animation. Hardware reset returns to the face
 and USB speech startup.
+
+`memory` reports free, largest and lifetime-minimum internal/PSRAM heap bytes.
+`tts stop` cancels playback, closes the mouth and parks inference workers before
+returning inference buffers to the PSRAM heap. Wait for `OK tts stop` before
+using the released memory. A timeout retains ownership; retry stop to finish.
+An `ESP_FAIL` from a latched kernel/DMA parking error retains ownership and
+requires `reboot`; retry cannot prove that a timed-out DMA transfer finished.
+`tts resume` reacquires the buffers and rebuilds the engine without calibration
+or changing volume. Worker stacks, frontend state, kernel scratch and codec DMA
+remain allocated. This is an inference-memory handoff, not a full service unload.
+
+`tts probe` requires a successful stop. It overwrites the reserved internal
+workspace, allocates and checks a temporary 3 MiB PSRAM buffer, then returns both.
+Resume and run `test` to check golden PCM after this simulated engine handoff.
+The probe does not run STT. The internal workspace stays reserved rather than
+entering the general heap, so its 239,948 bytes do not appear as free heap.
+Text commands are rejected while stopped. `reboot` also works while stopped.
 
 ## Flash and recovery
 

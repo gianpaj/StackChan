@@ -1,6 +1,6 @@
 # Agent Note: Local Ito speech in the original application
 
-Status: implemented. USB speech uses the original face and codec.
+Status: implemented — USB speech uses the original face and codec.
 
 ## Problem
 
@@ -168,3 +168,20 @@ ELF, linker map, SDK configuration and build logs are archived outside the build
 tree under `original-ito-candidate-3/validation-artifacts` in the private device
 backup. The archive manifest checksums every artifact. Credentials, NVS and full
 flash backups remain outside Git.
+
+## USB inference handoff
+
+The local application owns the USB task, so control remains available while Ito
+is stopped. `memory` reports allocator bytes. `tts stop` and `tts resume` call
+the shared service lifecycle. `tts probe` temporarily borrows the reserved hot
+workspace and checks a separate 3 MiB PSRAM allocation. It exercises ownership
+without adding STT or changing flash storage.
+
+The [service header](https://github.com/gianpaj/ito/blob/d41d3996eb75f2f3b4d819b073ba35ab448bac92/esp32/runtime/itofs_service.h) defines
+resource ownership and failure behavior. The source is pinned in `repos.json`.
+The codec remains open, volume persists, and the face stays in standby during
+a handoff. Reboot remains available through USB when inference is stopped or
+parking fails. Keeping control inside Ito's console was rejected because the
+application must own transitions and diagnostics independently of admission.
+
+Integrated device handoff measurements are pending.
