@@ -72,6 +72,10 @@ esp_err_t ApplyIli9342eInit(esp_lcd_panel_io_handle_t panel_io)
 }  // namespace
 
 class Pmic : public Axp2101 {
+#if CONFIG_STACKCHAN_LOCAL_ITO
+    std::mutex power_rail_mutex_;
+    bool microphone_power_enabled_ = false;
+#endif
 public:
     /**
      * @brief axp2101 charge currnet voltage parameters.
@@ -121,8 +125,9 @@ public:
     void WritePowerEnable(uint8_t value)
     {
 #if CONFIG_STACKCHAN_LOCAL_ITO
-        // ALDO2 supplies the microphones. Every rail update keeps it off.
-        value &= ~0x02;
+        std::lock_guard<std::mutex> lock(power_rail_mutex_);
+        // ALDO2 is enabled only for the explicit capture interval.
+        value = (value & ~0x02) | (microphone_power_enabled_ ? 0x02 : 0);
 #endif
         WriteReg(0x90, value);
 #if CONFIG_STACKCHAN_LOCAL_ITO
@@ -131,6 +136,33 @@ public:
         ESP_ERROR_CHECK(readback == value ? ESP_OK : ESP_ERR_INVALID_STATE);
 #endif
     }
+
+#if CONFIG_STACKCHAN_LOCAL_ITO
+    bool SetMicrophonePower(bool enabled)
+    {
+        std::lock_guard<std::mutex> lock(power_rail_mutex_);
+        if (!enabled) {
+            microphone_power_enabled_ = false;
+        }
+        uint8_t current = 0;
+        if (TryReadRegs(0x90, &current, 1) != ESP_OK) {
+            return false;
+        }
+        const uint8_t wanted = (current & ~0x02) | (enabled ? 0x02 : 0);
+        const uint8_t command[] = {0x90, wanted};
+        uint8_t readback = 0;
+        if (i2c_master_transmit(i2c_device_, command, sizeof(command), 100) != ESP_OK ||
+            TryReadRegs(0x90, &readback, 1) != ESP_OK || readback != wanted) {
+            microphone_power_enabled_ = false;
+            const uint8_t power_off[] = {0x90, static_cast<uint8_t>(current & ~0x02)};
+            i2c_master_transmit(i2c_device_, power_off, sizeof(power_off), 100);
+            ESP_LOGE(TAG, "Microphone power update failed");
+            return false;
+        }
+        microphone_power_enabled_ = enabled;
+        return true;
+    }
+#endif
 
     void SetBrightness(uint8_t brightness)
     {
@@ -710,6 +742,10 @@ private:
     }
 
 public:
+#if CONFIG_STACKCHAN_LOCAL_ITO
+    bool SetMicrophonePower(bool enabled) { return pmic_->SetMicrophonePower(enabled); }
+#endif
+
     M5StackCoreS3Board()
     {
         InitializeI2c();
@@ -810,6 +846,14 @@ i2c_master_bus_handle_t hal_bridge::board_get_i2c_bus()
     auto& board = (M5StackCoreS3Board&)Board::GetInstance();
     return board.GetI2cBus();
 }
+
+#if CONFIG_STACKCHAN_LOCAL_ITO
+bool hal_bridge::board_set_microphone_power(bool enabled)
+{
+    auto& board = static_cast<M5StackCoreS3Board&>(Board::GetInstance());
+    return board.SetMicrophonePower(enabled);
+}
+#endif
 
 StackChanCamera* hal_bridge::board_get_camera()
 {

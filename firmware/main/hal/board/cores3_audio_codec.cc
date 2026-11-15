@@ -11,6 +11,9 @@ CoreS3AudioCodec::CoreS3AudioCodec(void* i2c_master_handle, int input_sample_rat
     uint8_t aw88298_addr, uint8_t es7210_addr, bool input_reference) {
 #if CONFIG_STACKCHAN_LOCAL_ITO
     duplex_ = false;
+    local_i2c_bus_ = i2c_master_handle;
+    local_adc_addr_ = es7210_addr;
+    local_din_ = din;
 #else
     duplex_ = true; // 是否双工
 #endif
@@ -189,6 +192,9 @@ void CoreS3AudioCodec::CreateDuplexChannels(gpio_num_t mclk, gpio_num_t bclk, gp
     };
 
 #endif
+#if CONFIG_STACKCHAN_LOCAL_ITO
+    local_tx_gpio_ = std_cfg.gpio_cfg;
+#endif
     ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_handle_, &std_cfg));
 #if !CONFIG_STACKCHAN_LOCAL_ITO
     ESP_ERROR_CHECK(i2s_channel_init_tdm_mode(rx_handle_, &tdm_cfg));
@@ -277,11 +283,13 @@ int CoreS3AudioCodec::Write(const int16_t* data, int samples) {
 
 #if CONFIG_STACKCHAN_LOCAL_ITO
 #include <esp_timer.h>
+#include <freertos/task.h>
 #include <algorithm>
+#include "hal_bridge.h"
 
 bool CoreS3AudioCodec::LocalOpen(int sample_rate)
 {
-    if (sample_rate != output_sample_rate_) {
+    if (sample_rate != output_sample_rate_ || local_audio_fault_ || local_capture_active_) {
         return false;
     }
     if (output_enabled_) {
@@ -304,7 +312,8 @@ bool CoreS3AudioCodec::LocalOpen(int sample_rate)
 
 bool CoreS3AudioCodec::LocalWrite(const int16_t* data, size_t samples)
 {
-    if (!output_enabled_ || !data || samples == 0 || samples > AUDIO_CODEC_DMA_FRAME_NUM) {
+    if (!output_enabled_ || local_audio_fault_ || local_capture_active_ ||
+        !data || samples == 0 || samples > AUDIO_CODEC_DMA_FRAME_NUM) {
         return false;
     }
     size_t bytes_written = 0;
@@ -328,7 +337,7 @@ bool CoreS3AudioCodec::LocalWrite(const int16_t* data, size_t samples)
 
 bool CoreS3AudioCodec::LocalMute(bool muted)
 {
-    if (!output_enabled_ || !out_codec_if_->mute ||
+    if (!output_enabled_ || (!muted && (local_audio_fault_ || local_capture_active_)) || !out_codec_if_->mute ||
         out_codec_if_->mute(out_codec_if_, muted || output_volume_ == 0) != ESP_CODEC_DEV_OK) {
         return false;
     }
@@ -338,7 +347,7 @@ bool CoreS3AudioCodec::LocalMute(bool muted)
 
 bool CoreS3AudioCodec::LocalFlush()
 {
-    if (!output_enabled_) {
+    if (!output_enabled_ || local_audio_fault_ || local_capture_active_) {
         return false;
     }
     const bool restore_mute = local_muted_;
@@ -371,7 +380,7 @@ bool CoreS3AudioCodec::LocalFlush()
 
 bool CoreS3AudioCodec::LocalPlaying() const
 {
-    return output_enabled_ && esp_timer_get_time() < local_pending_until_us_;
+    return output_enabled_ && !local_capture_active_ && esp_timer_get_time() < local_pending_until_us_;
 }
 
 bool CoreS3AudioCodec::LocalSetVolume(int volume)
@@ -389,5 +398,154 @@ bool CoreS3AudioCodec::LocalSetVolume(int volume)
     }
     output_volume_ = volume;
     return LocalMute(local_muted_);
+}
+
+bool CoreS3AudioCodec::LocalStartCapture()
+{
+    if (!output_enabled_ || local_audio_fault_ || local_capture_active_) {
+        return false;
+    }
+    if (!LocalMute(true) || !LocalFlush()) {
+        return false;
+    }
+    local_capture_active_ = true;
+    auto fail = [this]() {
+        LocalEndCapture();
+        return false;
+    };
+    if (i2s_channel_disable(tx_handle_) != ESP_OK) {
+        local_audio_fault_ = true;
+        return fail();
+    }
+    local_tx_paused_ = true;
+    auto unused_gpio = local_tx_gpio_;
+    unused_gpio.mclk = unused_gpio.bclk = unused_gpio.ws = I2S_GPIO_UNUSED;
+    unused_gpio.dout = unused_gpio.din = I2S_GPIO_UNUSED;
+    if (i2s_channel_reconfig_std_gpio(tx_handle_, &unused_gpio) != ESP_OK) {
+        return fail();
+    }
+
+    i2s_chan_config_t channel = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
+    channel.dma_desc_num = 3;
+    channel.dma_frame_num = 320;
+    if (i2s_new_channel(&channel, nullptr, &rx_handle_) != ESP_OK) {
+        return fail();
+    }
+    i2s_std_config_t config = {};
+    config.clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(16000);
+    config.slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_MONO);
+    config.slot_cfg.slot_mask = I2S_STD_SLOT_LEFT;
+    config.gpio_cfg = local_tx_gpio_;
+    config.gpio_cfg.dout = I2S_GPIO_UNUSED;
+    config.gpio_cfg.din = local_din_;
+    if (i2s_channel_init_std_mode(rx_handle_, &config) != ESP_OK ||
+        i2s_channel_enable(rx_handle_) != ESP_OK) {
+        return fail();
+    }
+    local_rx_running_ = true;
+    if (!hal_bridge::board_set_microphone_power(true)) {
+        return fail();
+    }
+    vTaskDelay(pdMS_TO_TICKS(10));
+    audio_codec_i2c_cfg_t i2c_config = {};
+    i2c_config.port = 1;
+    i2c_config.addr = local_adc_addr_;
+    i2c_config.bus_handle = local_i2c_bus_;
+    in_ctrl_if_ = audio_codec_new_i2c_ctrl(&i2c_config);
+    if (!in_ctrl_if_) {
+        return fail();
+    }
+    es7210_codec_cfg_t adc_config = {};
+    adc_config.ctrl_if = in_ctrl_if_;
+    adc_config.mic_selected = ES7210_SEL_MIC1;
+    in_codec_if_ = es7210_codec_new(&adc_config);
+    if (!in_codec_if_) {
+        return fail();
+    }
+    esp_codec_dev_sample_info_t format = {};
+    format.bits_per_sample = 16;
+    format.channel = 2;
+    format.channel_mask = ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0);
+    format.sample_rate = 16000;
+    format.mclk_multiple = 256;
+    if (in_codec_if_->set_fs(in_codec_if_, &format) != ESP_CODEC_DEV_OK ||
+        in_codec_if_->set_mic_gain(in_codec_if_, 30) != ESP_CODEC_DEV_OK ||
+        in_codec_if_->enable(in_codec_if_, true) != ESP_CODEC_DEV_OK ||
+        in_codec_if_->mute_mic(in_codec_if_, false) != ESP_CODEC_DEV_OK) {
+        return fail();
+    }
+    // Discard the RX ring filled during ADC startup before delivering audio.
+    int16_t warmup[320];
+    for (int i = 0; i < 3; ++i) {
+        if (!LocalReadCapture(warmup, 320)) {
+            return fail();
+        }
+    }
+    return true;
+}
+
+bool CoreS3AudioCodec::LocalReadCapture(int16_t* data, size_t samples)
+{
+    if (!local_capture_active_ || !local_rx_running_ || local_audio_fault_ ||
+        !data || samples == 0 || samples > 320) {
+        return false;
+    }
+    const size_t bytes = samples * sizeof(int16_t);
+    size_t received = 0;
+    const auto error = i2s_channel_read(rx_handle_, data, bytes, &received, 40);
+    if (error != ESP_OK || received != bytes) {
+        ESP_LOGE(TAG, "Microphone read failed: %s, %u/%u bytes", esp_err_to_name(error),
+                 static_cast<unsigned>(received), static_cast<unsigned>(bytes));
+        return false;
+    }
+    return true;
+}
+
+bool CoreS3AudioCodec::LocalEndCapture()
+{
+    bool ok = true;
+    if (in_codec_if_) {
+        if (in_codec_if_->enable(in_codec_if_, false) != ESP_CODEC_DEV_OK) {
+            ok = false;
+        }
+        audio_codec_delete_codec_if(in_codec_if_);
+        in_codec_if_ = nullptr;
+    }
+    if (in_ctrl_if_) {
+        audio_codec_delete_ctrl_if(in_ctrl_if_);
+        in_ctrl_if_ = nullptr;
+    }
+    if (rx_handle_) {
+        if (local_rx_running_ && i2s_channel_disable(rx_handle_) != ESP_OK) {
+            ok = false;
+        }
+        local_rx_running_ = false;
+        if (i2s_del_channel(rx_handle_) != ESP_OK) {
+            ok = false;
+        } else {
+            rx_handle_ = nullptr;
+        }
+    }
+    // Cut microphone power even when ADC or DMA cleanup fails.
+    if (!hal_bridge::board_set_microphone_power(false)) {
+        ok = false;
+    }
+    if (ok && !local_audio_fault_ && local_tx_paused_) {
+        i2s_std_clk_config_t clock = I2S_STD_CLK_DEFAULT_CONFIG(static_cast<uint32_t>(output_sample_rate_));
+        if (i2s_channel_reconfig_std_clock(tx_handle_, &clock) != ESP_OK ||
+            i2s_channel_reconfig_std_gpio(tx_handle_, &local_tx_gpio_) != ESP_OK ||
+            i2s_channel_enable(tx_handle_) != ESP_OK) {
+            ok = false;
+        } else {
+            local_tx_paused_ = false;
+        }
+    }
+    local_capture_active_ = false;
+    local_pending_until_us_ = 0;
+    if (!ok) {
+        local_audio_fault_ = true;
+        ESP_LOGE(TAG, "Microphone cleanup failed; speaker remains blocked");
+    }
+    return ok && !local_audio_fault_;
 }
 #endif
