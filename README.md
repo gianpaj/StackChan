@@ -30,3 +30,25 @@ Thank you to the contributors of the StackChan community, especially:
 | -------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | [@stack_chan](https://x.com/stack_chan)                                          | [@mongonta555](https://x.com/mongonta555)                                   |
 | Shinya Ishikawa                                                                  | Takao Akaki                                                                 |
+
+## Offline voice on ESP32-S3
+
+The local conversation profile runs Oido STT, Ito TTS and the original speaking
+face on the ESP32-S3 with 8 MB PSRAM. The computer supplies a fixed reply over
+USB after recognition. No LLM or cloud service is called.
+
+Four user-run five-second microphone tests on 15 November 2026 measure:
+
+| Interval | Average | Sample p95 |
+|---|---:|---:|
+| Final microphone read to first I2S | 1,465.7 ms | 1,474.2 ms |
+| Final transcript to first I2S | 939.0 ms | 941.0 ms |
+| Supplied reply text to first I2S | 907.8 ms | 908.0 ms |
+
+Zero output underruns across all four replies. The fixed two-sentence reply is
+split into two TTS utterances; the table measures the first I2S submission.
+These are software endpoints, excluding acoustic latency. With four samples,
+nearest-rank p95 equals the maximum, not a general latency guarantee.
+
+[Local setup and commands](firmware/LOCAL_CONVERSATION.md) ·
+[Per-run results, command and provenance](https://github.com/gianpaj/ito/blob/docs/stackchan-ito-plan/results/stackchan/2026-11-15-user-four-run/README.md).
