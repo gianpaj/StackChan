@@ -87,8 +87,8 @@ extern "C" esp_err_t itofs_service_command(const char* command) {
 }
 namespace oido_recognizer {
 Session::~Session() { }
-esp_err_t Session::begin(const itofs_workspace_t&, const Callbacks&) {
-    assert(lease_owned);owns_run_=true;result_=ESP_OK;session_begins++;return result_;
+esp_err_t Session::begin(const itofs_workspace_t&, const Callbacks&, int chunk_frames) {
+    assert(lease_owned && chunk_frames==4);owns_run_=true;result_=ESP_OK;session_begins++;return result_;
 }
 esp_err_t Session::feed(const int16_t*,size_t count) {
     assert(lease_owned && count && count<=320);session_feeds++;

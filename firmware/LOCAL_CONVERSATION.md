@@ -100,7 +100,8 @@ interpreted as a command. Speech can be cancelled with `cancel`.
 `listen` without a number records at most ten seconds. `listen N` accepts whole
 seconds from 1 to 10. There is no automatic end-of-speech detector. Model setup completes before `LISTENING`. Recognition consumes PCM during
 capture; only queued input, the final encoder chunk and Ito restoration remain
-after recording ends. Greedy decoding uses no optional language model. Check
+after recording ends. Live recognition uses four-frame encoder chunks; uploaded
+WAV diagnostics use eight. Greedy decoding uses no optional language model. Check
 transcription quality on your own speech before relying on it.
 
 ## Fixed audio

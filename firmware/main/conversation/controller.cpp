@@ -96,7 +96,7 @@ void run_turn()
     int64_t drained_us = 0, transcript_us = 0;
     if (error == ESP_OK && microphone && !cancelled.load()) {
         oido_recognizer::Session recognition;
-        error = recognition.begin(workspace, {is_cancelled, progress});
+        error = recognition.begin(workspace, {is_cancelled, progress}, 4);
         if (error == ESP_OK && !cancelled.load()) {
             const bool started = local_ito_board::start_capture();
             if (!started) {
@@ -174,9 +174,9 @@ void run_turn()
     const auto resumed = stopped && audio_ok ? itofs_service_resume() : ESP_FAIL;
     progress();
     const int64_t resume_us = esp_timer_get_time();
-    printf("TURN_TIMING turn=%u last_input_us=%lld input_drained_us=%lld final_transcript_us=%lld resume_done_us=%lld backlog_samples=%u\n",
-           turn, (long long)(microphone ? last_input_us : 0), (long long)drained_us,
-           (long long)transcript_us, (long long)resume_us, unsigned(microphone ? capture_backlog : 0));
+    printf("TURN_TIMING turn=%u last_input_us=%.0f input_drained_us=%.0f final_transcript_us=%.0f resume_done_us=%.0f backlog_samples=%u\n",
+           turn, (double)(microphone ? last_input_us : 0), (double)drained_us,
+           (double)transcript_us, (double)resume_us, unsigned(microphone ? capture_backlog : 0));
     if (resumed != ESP_OK) {
         transcript[0] = 0;
         set_phase(Phase::fault);
