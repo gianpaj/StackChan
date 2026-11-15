@@ -93,3 +93,12 @@ sequences. Model weights, private human transcripts and full flash backups stay
 outside Git. No network responder is installed by this milestone.
 
 [Device measurements](https://github.com/gianpaj/ito/blob/e3df8e75a0ac115670a547db7f5c35f1084d5bb4/results/stackchan/2026-11-15-manual-oido/README.md) retain the exact run scope and provenance.
+
+The [streaming latency slice](https://github.com/gianpaj/ito/blob/docs/stackchan-ito-plan/results/stackchan/2026-11-15-streaming-latency/README.md)
+records four microphone timing probes, one completed public fixture and one
+upload failure before recognition. The final image measures 1,648.1 ms from
+the last RX read to first I2S, with 31.1 ms of Ito restoration. Final transcript
+to first I2S is 1,109.4 ms. The stricter 1,500 ms input-end target remains open.
+Immutable Ito tables occupy a separate 14,416-byte PSRAM cache. The control
+stack measurement follows the batch fixture; capture-specific control-stack
+high-water was not recorded. TTS scheduling and its underrun margin remain.

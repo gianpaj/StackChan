@@ -153,3 +153,10 @@ The [Ito host benchmark](https://github.com/gianpaj/ito/blob/docs/stackchan-ito-
 runs from the Ito checkout and uses this firmware's existing USB timing hooks.
 It defaults to one recording and a supplied reply, with JSON/CSV results for STT,
 restoration and text-to-first-I2S latency. It does not invoke an LLM.
+
+The [streaming measurements](https://github.com/gianpaj/ito/blob/docs/stackchan-ito-plan/results/stackchan/2026-11-15-streaming-latency/README.md)
+measure 1.65 seconds from the final RX read to first I2S and 1.11 seconds from
+final transcript to first I2S. The strict 1.5-second input-end target remains
+open. Fixed-reply benchmarks call no LLM and measure software endpoints rather
+than audible onset. Four microphone timing turns and one public-fixture turn
+report zero output underruns, including a 7.05-second reply.

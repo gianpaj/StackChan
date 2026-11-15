@@ -75,3 +75,12 @@ The six-frame native probe without weight prefetch uses 193,456 hot bytes and
 1,273,120 PSRAM bytes. It needs 4,637.3 ms to feed and 312.1 ms to finish, with
 245.8 ms of queued input drain. Its final-input-read to transcript tail is
 558.8 ms. The controller owns the complete turn measurements.
+
+With upstream weight preload enabled, the final native six-frame turn feeds in
+4,268.7 ms and finishes in 303.0 ms. Queued input still takes 234.8 ms to drain;
+the final-read to transcript tail is 538.7 ms. The complete turn reaches first
+I2S in 1,648.1 ms, above the strict 1,500 ms target. A separate native eight-frame
+public fixture matches its host transcript with preload enabled. Both its
+7.05-second supplied reply and the microphone reply have zero underruns.
+The [latency report](https://github.com/gianpaj/ito/blob/docs/stackchan-ito-plan/results/stackchan/2026-11-15-streaming-latency/README.md)
+retains image/model/patch provenance and the measured boundaries.
