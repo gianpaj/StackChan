@@ -39,10 +39,14 @@ void Hal::init()
 #if !CONFIG_STACKCHAN_LOCAL_ITO
     xiaozhi_mcp_init();
 #endif
+#if !CONFIG_STACKCHAN_LOCAL_ITO
     head_touch_init();
+#endif
     io_expander_init();
     rtc_init();
+#if !CONFIG_STACKCHAN_LOCAL_ITO
     imu_init();
+#endif
 #if CONFIG_STACKCHAN_LOCAL_ITO
     // Keep menu actions safe without a servo bus or motor power.
     class LocalServo : public stackchan::motion::Servo {

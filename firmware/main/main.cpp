@@ -30,6 +30,8 @@ static esp_err_t early_hot_result = ESP_ERR_INVALID_STATE;
 ESP_SYSTEM_INIT_FN(reserve_ito_hot, CORE, BIT(0), 106)
 {
     early_hot_result = itofs_service_reserve_hot(239948);
+    // Keep ordinary UI objects in PSRAM; DMA and task stacks request internal RAM.
+    heap_caps_malloc_extmem_enable(0);
     return ESP_OK;
 }
 #endif

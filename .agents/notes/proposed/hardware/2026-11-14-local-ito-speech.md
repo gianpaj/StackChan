@@ -81,3 +81,26 @@ The corrected build passes. Static DIRAM use is 108,179 bytes, compared with
 state instead of restarting repeatedly. Runtime memory and speech validation
 remain pending download-mode recovery. The corrected candidate is an app-only
 update because candidate 1's layout, model and assets are verified.
+
+## Original face and remaining startup memory
+
+Candidate 2 boots after a whole-chip reset. USB-only resets retain a cached low
+boot strap in download mode on this unit. Esptool's ESP32-S3 watchdog reset
+resamples it; reopening the plain monitor then reaches the app. This is a
+controlled reset, not a watchdog failure in the firmware.
+
+The hot arena is confirmed in internal SRAM. The user confirms the original
+face is visible and the motors stay still. Before the avatar there are 56,558
+internal bytes free; afterward 46,466. Kernel setup leaves 14 KB, insufficient
+for all speech task stacks. The app reports the failure and keeps the face live.
+
+The early hook sets ordinary malloc allocations to prefer PSRAM through
+`heap_caps_malloc_extmem_enable(0)`. DMA and task stacks still request internal
+memory. This keeps UI objects outside the SRAM reserved for synthesis. Head-pet
+and IMU modifiers are disabled in this profile, so their sensor initialization
+and head-touch worker are omitted. Display touch for the original menus stays
+active. The normal profile retains its original initialization.
+
+The new local build passes. Integrated speech validation remains pending the
+app-only update and startup check. No engine or model arithmetic changes are
+part of this correction.
