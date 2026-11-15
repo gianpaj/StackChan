@@ -84,3 +84,10 @@ and MIC3 as speaker feedback. Keep the selected MIC1 route when changing the
 capture controller. See the [schematic](https://m5stack-doc.oss-cn-shenzhen.aliyuncs.com/490/Sch_M5_CoreS3_v1.0.pdf).
 Host mocks cannot establish physical signal quality. Private device recordings
 and transcripts stay outside Git.
+
+The listening-LED image builds and is flashed as an app-only update. One native
+five-second capture delivers 80,000 samples with successful cleanup, followed
+by a 4.49-second supplied reply with zero logged output underruns. Its source
+is `e62c35e`; its image SHA-256 is
+`395a035034d01e6821e88e8480ea1d940c2d10c536c87589988218981a6882ef`.
+Physical LED-colour confirmation is pending. The bounded check adds no soak run.
