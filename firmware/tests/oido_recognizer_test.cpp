@@ -160,6 +160,21 @@ int main(int argc, char** argv)
         assert(mappings == 0 && tasr_alloc == alloc_hook && tasr_free == free_hook);
         assert(tasr_parallel == parallel_hook && tasr_par_mask == mask && tasr_wpf == wpf);
     }
+    reset();
+    {
+        oido_recognizer::Session session;
+        for (int frames : {0, 1, 7, 16, -4})
+            assert(session.begin(workspace, callbacks, frames) == ESP_ERR_INVALID_ARG && mappings == 0);
+        assert(session.begin(workspace, callbacks, 4) == ESP_OK);
+        for (size_t offset = 0; offset < pcm.size(); offset += 320)
+            assert(session.feed(pcm.data() + offset, std::min(size_t(320), pcm.size() - offset)) == ESP_OK);
+        assert(session.finish(output, sizeof output) == ESP_OK && output[0]);
+        assert(session.close(&metrics) == ESP_OK);
+        assert(metrics.psram_used <= workspace.psram_bytes && metrics.hot_used <= workspace.hot_bytes);
+        assert(baseline == output);
+        std::printf("chunk4 scratch: hot=%zu psram=%zu bytes; chunk8_text_match=%s\n%s\n",
+                    metrics.hot_used, metrics.psram_used, baseline == output ? "yes" : "no", output);
+    }
     // Cancellation during a live session cannot strand global hooks or mapping.
     reset();
     {

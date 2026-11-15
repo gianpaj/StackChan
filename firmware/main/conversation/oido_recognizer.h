@@ -26,7 +26,8 @@ struct Metrics {
 
 /* One worker owns a stopped-Ito workspace until close() returns. begin() checks
  * the complete model before capture; feed() consumes 1..320 mono 16 kHz samples
- * before returning, with a total bound of 160000 samples. PCM and transcript
+ * before returning, with a total bound of 160000 samples. Encoder chunks are
+ * 4 or 8 frames, with 8 as the default and context fixed at 64. PCM and transcript
  * storage must be outside both workspace ranges. finish() needs 2048 bytes.
  *
  * The session holds the process-wide Oido allocator and parallel hooks. Another
@@ -46,7 +47,8 @@ public:
     ~Session();
     Session(const Session&) = delete;
     Session& operator=(const Session&) = delete;
-    esp_err_t begin(const itofs_workspace_t& workspace, const Callbacks& callbacks = {});
+    esp_err_t begin(const itofs_workspace_t& workspace, const Callbacks& callbacks = {},
+                    int chunk_frames = 8);
     esp_err_t feed(const int16_t* pcm, size_t samples);
     esp_err_t finish(char* output, size_t output_capacity);
     esp_err_t close(Metrics* metrics = nullptr);

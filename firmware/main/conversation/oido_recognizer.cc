@@ -155,7 +155,7 @@ esp_err_t verify_model(Run& run)
     return std::memcmp(digest, kModelSha256, sizeof digest) == 0 ? ESP_OK : ESP_ERR_INVALID_CRC;
 }
 
-esp_err_t open_run(Run& run)
+esp_err_t open_run(Run& run, int chunk_frames)
 {
     if (cancelled(run)) return kCancelled;
     const esp_partition_t* partition = esp_partition_find_first(
@@ -190,7 +190,7 @@ esp_err_t open_run(Run& run)
     if (!tasr_nemo_stream_supported(run.model)) return ESP_ERR_NOT_SUPPORTED;
     progress(run);
     if (cancelled(run)) return kCancelled;
-    run.stream = tasr_nemo_stream_new(run.model, 8, 64, nullptr);
+    run.stream = tasr_nemo_stream_new(run.model, chunk_frames, 64, nullptr);
     if (!run.stream) return run.allocation_failed ? ESP_ERR_NO_MEM : ESP_ERR_INVALID_RESPONSE;
     return ESP_OK;
 }
@@ -230,9 +230,11 @@ itofs_workspace_t workspace_of(const Run& run)
 
 Session::~Session() { close(); }
 
-esp_err_t Session::begin(const itofs_workspace_t& workspace, const Callbacks& callbacks)
+esp_err_t Session::begin(const itofs_workspace_t& workspace, const Callbacks& callbacks,
+                         int chunk_frames)
 {
     if (owns_run_) return ESP_ERR_INVALID_STATE;
+    if (chunk_frames != 4 && chunk_frames != 8) return ESP_ERR_INVALID_ARG;
     if (!workspace.hot || !workspace.psram || workspace.hot_bytes < kMinimumHot ||
         workspace.psram_bytes < kMinimumPsram) return ESP_ERR_NO_MEM;
     if (!valid_workspace(workspace) || touches_workspace(workspace, this, sizeof *this))
@@ -244,7 +246,7 @@ esp_err_t Session::begin(const itofs_workspace_t& workspace, const Callbacks& ca
     session_run = Run{{static_cast<uint8_t*>(workspace.hot), workspace.hot_bytes},
                       {static_cast<uint8_t*>(workspace.psram), workspace.psram_bytes}, callbacks, {}};
     const int64_t started = esp_timer_get_time();
-    result_ = open_run(session_run);
+    result_ = open_run(session_run, chunk_frames);
     session_run.metrics.setup_us = esp_timer_get_time() - started;
     if (result_ != ESP_OK) close();
     return result_;

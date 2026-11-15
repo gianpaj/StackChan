@@ -16,7 +16,9 @@ remains cooperative. Close returns the retained failure and final metrics.
 
 Feeds consume 1..320 mono 16 kHz samples synchronously, with a cumulative
 160,000-sample cap. PCM, transcript storage and the session object stay outside
-the workspace. The batch `recognize` wrapper uses the same lifecycle.
+the workspace. Encoder chunks can be 4 or 8 frames, with context fixed at 64.
+The default and batch `recognize` wrapper use 8. Smaller chunks let the
+controller measure finish latency without changing decoding or ownership.
 
 The PSRAM admission bound is 1,310,720 bytes and the hot bound is 229,376 bytes.
 This admits the 1,695,168-byte tail after Ito's retained weights. Allocations
@@ -28,7 +30,10 @@ compute and finish times exclude the caller's wait for captured PCM.
 `python3 firmware/tests/oido_recognizer_test.py` passes with ASan and UBSan.
 The actual patched engine produces identical batch/stream transcripts for the
 public b05 fixture. It uses 211,488 hot bytes and 1,309,440 PSRAM bytes on the
-host, and passes at the PSRAM admission bound. The harness checks workspace
+host, and passes at the PSRAM admission bound. The 4-frame session produces
+the same b05 transcript and uses 188,960 hot bytes and 1,216,624 PSRAM bytes.
+This is a single-fixture parity check; broader recognition quality is unmeasured.
+The harness rejects unsupported chunk sizes and checks workspace
 aliases, rejected chunks, the sample cap, cancellation after encoder work,
 failed setup, reentry and destructor/idempotent close cleanup.
 
