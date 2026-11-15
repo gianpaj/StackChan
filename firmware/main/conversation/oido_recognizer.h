@@ -19,6 +19,7 @@ struct Metrics {
     size_t psram_used = 0;
     size_t allocations = 0;
     int encoder_frames = 0;
+    int weight_prefetch = 0;
     int64_t setup_us = 0;
     int64_t feed_us = 0;
     int64_t finish_us = 0;

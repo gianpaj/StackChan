@@ -1,4 +1,12 @@
-# Oido streaming session
+# Agent Note: Oido streaming session
+
+Status: implemented — Bounded sessions and native capture handoffs are verified.
+
+## Problem
+
+Batch recognition leaves the complete recognition workload after recording.
+Live capture needs an engine lifetime that spans incoming PCM without releasing
+Ito's borrowed memory or its process-wide Oido hooks between feeds.
 
 ## Decision
 
@@ -6,7 +14,12 @@
 `feed`, `finish` and `close`. The caller completes `begin` before starting
 capture, feeds published PCM on one recognition worker and closes the session
 before returning the workspace. Every begin hashes the complete approved model
-before parsing it. Weights stay mapped from flash.
+before parsing it. Weights stay mapped from flash. The session keeps upstream's
+single-core weight-preload policy. The dependency patch preserves the ROM
+preloader's prior autoload state, and every preload-starting kernel waits before
+returning. Cancellation occurs between those calls. Ito's GDMA staging is parked
+before the lease begins. Flash writes, MMU/cache reconfiguration and other manual
+preload users must remain outside this exclusive session.
 
 One static bounded run holds the model, stream and process-wide Oido hooks.
 A second session is rejected. `close` restores the hooks, destroys all model
@@ -25,7 +38,20 @@ This admits the 1,695,168-byte tail after Ito's retained weights. Allocations
 remain checked against the supplied arena lengths. Setup, accumulated feed
 compute and finish times exclude the caller's wait for captured PCM.
 
-## Verification
+## Alternatives considered
+
+Running the batch wrapper after capture adds the complete STT duration to the
+response gap. Running inference inside the RX read loop can exceed its DMA
+window. The controller uses its existing control task as a separate producer.
+Four-frame chunks reduce the final partial chunk but fall behind on the native
+five-second probe. Eight-frame chunks keep up but have a longer final chunk.
+Unconditionally disabling upstream weight preload discards its build policy.
+Keeping that policy with explicit completion and restored autoload avoids a
+second asynchronous owner or another task.
+Six-frame chunks provide an intermediate configuration; its output is pinned
+separately because changing the chunk size can change recognition.
+
+## Consequences
 
 `python3 firmware/tests/oido_recognizer_test.py` passes with ASan and UBSan.
 The actual patched engine produces identical 8-frame batch/stream transcripts
@@ -45,4 +71,7 @@ leaves 894 ms of backlog and needs 328.6 ms to finish. Its capture-end to
 transcript tail is 1,223.8 ms. The 8-frame probe spends 3,902.6 ms feeding
 and 453.9 ms finishing, keeping up with capture. A shorter encoder chunk can
 reduce finish work while adding enough feed work to increase total latency.
-The 6-frame native latency is unmeasured; the controller owns that check.
+The six-frame native probe without weight prefetch uses 193,456 hot bytes and
+1,273,120 PSRAM bytes. It needs 4,637.3 ms to feed and 312.1 ms to finish, with
+245.8 ms of queued input drain. Its final-input-read to transcript tail is
+558.8 ms. The controller owns the complete turn measurements.

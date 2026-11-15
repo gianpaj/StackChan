@@ -182,7 +182,8 @@ esp_err_t open_run(Run& run, int chunk_frames)
     tasr_free = release;
     tasr_parallel = serial_parallel;
     tasr_par_mask = UINT32_MAX;
-    tasr_wpf = 0;
+    // Keep the upstream build policy; synchronous kernels drain weight preload.
+    run.metrics.weight_prefetch = tasr_wpf;
     run.hooks_installed = true;
 
     run.model = tasr_nemo_load(run.blob, kModelBytes);

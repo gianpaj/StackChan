@@ -151,10 +151,10 @@ void run_turn()
                                            sizeof(transcript), {is_cancelled, progress}, &metrics);
         transcript_us = esp_timer_get_time();
     }
-    printf("STT turn=%u hot=%u psram=%u allocations=%u frames=%d setup_ms=%.1f feed_ms=%.1f finish_ms=%.1f\n",
+    printf("STT turn=%u hot=%u psram=%u allocations=%u frames=%d setup_ms=%.1f feed_ms=%.1f finish_ms=%.1f prefetch=%d\n",
            turn, unsigned(metrics.hot_used), unsigned(metrics.psram_used), unsigned(metrics.allocations),
            metrics.encoder_frames, metrics.setup_us / 1000.0, metrics.feed_us / 1000.0,
-           metrics.finish_us / 1000.0);
+           metrics.finish_us / 1000.0, metrics.weight_prefetch);
     // Recognition has returned and destroyed all model/stream users of the lease.
     set_phase(Phase::restoring);
     if (leased) {
