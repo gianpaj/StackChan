@@ -1,7 +1,6 @@
 # Local Ito speech in the original application
 
-Status: deployed speech and face animation pass. Launcher re-entry validation
-is pending. The deployed code is `f799097`, with Ito runtime `b741244`.
+Status: deployed speech, face animation, cancellation and launcher re-entry pass. The deployed code is `f799097`, with Ito runtime `b741244`.
 
 ## Decision
 
@@ -54,7 +53,7 @@ and verified. It booted, passed both self-tests and played its greeting with zer
 underruns. This checks flash recovery, not factory cloud or motor operation.
 
 Device memory, audio, mouth animation and cancellation are verified below.
-Keep this note proposed until launcher re-entry is verified.
+The selected local-speech scope is implemented and verified.
 
 ## First boot and contiguous SRAM
 
@@ -132,4 +131,9 @@ Evidence is in `firmware/build-local-ito/device-tests/`, including JSON results
 and session `20261115T075242.489421Z`. Private image manifests and recovery files
 remain outside Git. [Local Ito speech](../../../../firmware/LOCAL_ITO.md) is the
 canonical build, monitor and boot guide. Factory cloud/motor operation is outside
-this validation. Launcher re-entry remains the final physical check.
+this validation. The user confirms Home returns to the launcher and AI.AGENT restores the face.
+A second golden self-test and following greeting pass after re-entry, with zero
+underruns. Final free internal memory is 13,242 bytes, minimum 5,414 bytes.
+The USB monitor is closed, leaving the port available for interactive use.
+Three touch-poll timeout reports occurred during initial calibration; the driver
+skipped those samples, and the physical Home/re-entry check passed.

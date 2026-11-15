@@ -85,3 +85,8 @@ python -m esptool --chip esp32s3 --port /dev/cu.usbmodem1101 \
 The masked write clears the temporary force-download bit before esptool resets
 the chip. A USB-only reset can retain the cached download-mode strap on this
 unit. The command requires the ROM download connection after flashing.
+
+The [device validation record](../.agents/notes/implemented/hardware/2026-11-14-local-ito-speech.md)
+contains the deployed image hash, golden PCM checks, cancellation timing and
+launcher re-entry results. Measured paragraph compute RTF is 1.0352, so the
+firmware retains `degraded=1`. The tested paragraph has zero playback underruns.
