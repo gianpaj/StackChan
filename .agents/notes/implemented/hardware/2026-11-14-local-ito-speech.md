@@ -137,3 +137,16 @@ underruns. Final free internal memory is 13,242 bytes, minimum 5,414 bytes.
 The USB monitor is closed, leaving the port available for interactive use.
 Three touch-poll timeout reports occurred during initial calibration; the driver
 skipped those samples, and the physical Home/re-entry check passed.
+
+## Saved performance and memory results
+
+The [dated measurement report](https://github.com/gianpaj/ito/blob/386fc611f91b07fa3fa57a4f8f0aaeb06e2ed652/results/stackchan/2026-11-15-original-face/README.md) is the canonical detailed record. It includes
+per-utterance timings, exact sample-based RTF, memory units and snapshots, test
+outcomes, deployment/configuration hashes and a serial measurement trace.
+Final static DIRAM is 108,163 bytes in the deployed `f799097` image.
+
+The raw session, metadata, individual test JSON, helpers, host-reference records,
+ELF, linker map, SDK configuration and build logs are archived outside the build
+tree under `original-ito-candidate-3/validation-artifacts` in the private device
+backup. The archive manifest checksums every artifact. Credentials, NVS and full
+flash backups remain outside Git.

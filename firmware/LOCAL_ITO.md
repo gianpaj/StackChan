@@ -90,3 +90,6 @@ The [device validation record](../.agents/notes/implemented/hardware/2026-11-14-
 contains the deployed image hash, golden PCM checks, cancellation timing and
 launcher re-entry results. Measured paragraph compute RTF is 1.0352, so the
 firmware retains `degraded=1`. The tested paragraph has zero playback underruns.
+
+Detailed [performance and memory results](https://github.com/gianpaj/ito/blob/386fc611f91b07fa3fa57a4f8f0aaeb06e2ed652/results/stackchan/2026-11-15-original-face/README.md) include per-utterance JSON,
+heap snapshots, exact audio durations and the captured measurement trace.
