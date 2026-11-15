@@ -13,7 +13,7 @@ A separate conversation build preserves the original face and uses USB to own
 one half-duplex turn. `listen [1..10]` starts bounded microphone capture; `send`
 submits early; `cancel` discards it. Oido v2b uses flash weights and greedy
 streaming decoding without the optional language model. The USB control task captures PCM while the recognition worker feeds the
-streaming API with four encoder frames per chunk and 64 frames of context.
+streaming API with six encoder frames per chunk and 64 frames of context.
 Uploaded batch diagnostics retain eight-frame chunks. Model setup finishes
 before the LISTENING cue. The model stays flash-backed;
 mandatory transposed depthwise weights count in its measured workspace. The

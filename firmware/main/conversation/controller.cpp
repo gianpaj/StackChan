@@ -96,7 +96,7 @@ void run_turn()
     int64_t drained_us = 0, transcript_us = 0;
     if (error == ESP_OK && microphone && !cancelled.load()) {
         oido_recognizer::Session recognition;
-        error = recognition.begin(workspace, {is_cancelled, progress}, 4);
+        error = recognition.begin(workspace, {is_cancelled, progress}, 6);
         if (error == ESP_OK && !cancelled.load()) {
             const bool started = local_ito_board::start_capture();
             if (!started) {
