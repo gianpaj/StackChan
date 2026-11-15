@@ -33,6 +33,9 @@ using StackType_t = uint32_t;
 struct StaticTask_t { int unused; };
 static int64_t now_us;
 static int notifications, recognize_calls, resume_calls, return_calls, speak_calls;
+static int session_begins, session_feeds, session_finishes, session_closes;
+static int feed_error;
+static bool fed_during_capture;
 static int stop_error, resume_error, return_error, recognition_error;
 static bool lease_owned, late_cancel, fail_allocation, fail_task;
 static int heap_blocks, allocation_calls;
@@ -52,7 +55,7 @@ static void heap_caps_free(void* p) { if (p) { heap_blocks--;std::free(p); } }
 static int64_t esp_timer_get_time() { return now_us; }
 static int esp_task_wdt_reset() { return ESP_OK; }
 static int esp_task_wdt_add(void*) { return ESP_OK; }
-static void vTaskDelay(int) { now_us+=1000; }
+static void vTaskDelay(int) { now_us+=1000; local_conversation::poll(); }
 static int ulTaskNotifyTake(int,int) { return 0; }
 static void xTaskNotifyGive(TaskHandle_t) { notifications++; }
 static unsigned uxTaskGetStackHighWaterMark(void*) { return 1000; }
@@ -68,7 +71,7 @@ static bool read_capture_mono(int16_t* pcm,size_t n) { capture_reads++;std::mems
 static bool end_capture() { capture_ends++;return capture_end_ok; }
 }
 extern "C" esp_err_t itofs_service_stop(uint32_t) { return stop_error; }
-extern "C" esp_err_t itofs_service_borrow_memory(itofs_workspace_t* workspace) {
+extern "C" esp_err_t itofs_service_borrow_scratch(itofs_workspace_t* workspace) {
     assert(!lease_owned);lease_owned=true;
     *workspace={hot_pool,sizeof hot_pool,psram_pool,sizeof psram_pool};return ESP_OK;
 }
@@ -83,6 +86,19 @@ extern "C" esp_err_t itofs_service_command(const char* command) {
     assert(!lease_owned && std::strncmp(command,"text ",5)==0);speak_calls++;return ESP_OK;
 }
 namespace oido_recognizer {
+Session::~Session() { }
+esp_err_t Session::begin(const itofs_workspace_t&, const Callbacks&) {
+    assert(lease_owned);owns_run_=true;result_=ESP_OK;session_begins++;return result_;
+}
+esp_err_t Session::feed(const int16_t*,size_t count) {
+    assert(lease_owned && count && count<=320);session_feeds++;
+    fed_during_capture |= local_conversation::poll();
+    return feed_error;
+}
+esp_err_t Session::finish(char* text,size_t bytes) {
+    assert(lease_owned && bytes>=6);session_finishes++;std::strcpy(text,"hello");return recognition_error;
+}
+esp_err_t Session::close(Metrics*) { owns_run_=false;session_closes++;return result_; }
 esp_err_t recognize(const itofs_workspace_t&,const int16_t*,size_t,char* text,size_t bytes,const Callbacks& callbacks,Metrics*) {
     assert(lease_owned && bytes>=6);recognize_calls++;
     if (callbacks.cancelled && callbacks.cancelled()) return kCancelled;
@@ -107,6 +123,7 @@ static void reset_case() {
     transcript[0]=0;samples=limit=0;microphone=false;
     lease_owned=late_cancel=false;
     notifications=recognize_calls=resume_calls=return_calls=speak_calls=0;
+    session_begins=session_feeds=session_finishes=session_closes=0;feed_error=0;fed_during_capture=false;
     capture_start_ok=capture_end_ok=true;capture_starts=capture_ends=capture_reads=0;
     stop_error=resume_error=return_error=recognition_error=0;output.clear();now_us=0;
 }
@@ -173,6 +190,20 @@ int main() {
     assert(!transcript[0] && output.find("ERROR conversation recovery")!=std::string::npos);
     assert(output.find("CONVERSATION READY")==std::string::npos);
     std::puts("PASS failed RX cleanup prevents Ito resume and enters fault without READY");
+
+    reset_case();assert(command("listen 1"));run_turn();
+    assert(session_begins==1 && session_feeds==50 && session_finishes==1 && session_closes==1);
+    assert(fed_during_capture && capture_reads==50 && capture_ends==1);
+    assert(return_calls==1 && resume_calls==1 && !lease_owned && phase.load()==Phase::idle);
+    assert(published==16000 && consumed==16000 && capture_done);
+    assert(command("echo"));assert(speak_calls==1);
+    std::puts("PASS microphone producer and streaming consumer finish before restoring Ito and echo");
+
+    reset_case();feed_error=ESP_FAIL;assert(command("listen 1"));run_turn();
+    assert(session_feeds==1 && !session_finishes && session_closes==1 && capture_done);
+    assert(capture_ends==1 && return_calls==1 && resume_calls==1 && !lease_owned);
+    assert(!transcript[0] && phase.load()==Phase::idle);
+    std::puts("PASS failed streaming feed joins capture and closes the session before restoring Ito");
 
     heap_caps_free(pcm);pcm=nullptr;heap_caps_free(worker_storage);worker_storage=nullptr;assert(!heap_blocks);
     return 0;

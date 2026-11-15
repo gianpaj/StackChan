@@ -29,6 +29,12 @@ int16_t* pcm = nullptr;
 size_t samples = 0, limit = 0;
 int64_t upload_deadline = 0;
 bool microphone = false;
+// The USB task produces PCM; the recognition worker consumes published samples.
+std::atomic<size_t> published{0}, consumed{0};
+std::atomic<bool> capture_done{true}, capture_stop{false};
+bool capture_ok = true, capture_cleanup_ok = true;
+int64_t last_input_us = 0;
+size_t capture_backlog = 0;
 unsigned turn = 0;
 static EXT_RAM_BSS_ATTR char transcript[2048];
 
@@ -83,48 +89,72 @@ void run_turn()
     bool audio_ok = true;
     transcript[0] = 0;
     if (error == ESP_OK) {
-        error = itofs_service_borrow_memory(&workspace);
+        error = itofs_service_borrow_scratch(&workspace);
         leased = error == ESP_OK;
     }
+    oido_recognizer::Metrics metrics;
+    int64_t drained_us = 0, transcript_us = 0;
     if (error == ESP_OK && microphone && !cancelled.load()) {
-        const bool started = local_ito_board::start_capture();
-        if (!started) {
-            error = ESP_FAIL;
-            // Failed setup performs cleanup; verify the stopped hardware state.
-            audio_ok = local_ito_board::end_capture();
-        } else {
-            samples = 0;
-            set_phase(Phase::recording);
-            printf("LISTENING turn=%u rate=16000 max_samples=%u; send finishes, cancel discards\n",
-                   turn, unsigned(limit));
-            while (samples < limit && !cancelled.load() && !submitted.load()) {
-                const auto count = std::min(size_t(320), limit - samples);
-                if (!local_ito_board::read_capture_mono(pcm + samples, count)) {
-                    error = ESP_FAIL;
-                    break;
+        oido_recognizer::Session recognition;
+        error = recognition.begin(workspace, {is_cancelled, progress});
+        if (error == ESP_OK && !cancelled.load()) {
+            const bool started = local_ito_board::start_capture();
+            if (!started) {
+                error = ESP_FAIL;
+                audio_ok = local_ito_board::end_capture();
+            } else {
+                samples = 0;
+                published.store(0);
+                consumed.store(0);
+                capture_stop.store(false);
+                capture_ok = capture_cleanup_ok = true;
+                last_input_us = 0;
+                capture_backlog = 0;
+                capture_done.store(false);
+                printf("LISTENING turn=%u rate=16000 max_samples=%u; send finishes, cancel discards\n",
+                       turn, unsigned(limit));
+                set_phase(Phase::recording);
+                // Console polling reads RX independently of long encoder calls.
+                size_t fed = 0;
+                while (!capture_done.load() || fed < published.load()) {
+                    const size_t available = published.load();
+                    if (error == ESP_OK && !cancelled.load() && available > fed) {
+                        const size_t count = std::min(size_t(320), available - fed);
+                        error = recognition.feed(pcm + fed, count);
+                        fed += count;
+                        consumed.store(fed);
+                    } else {
+                        progress();
+                    }
+                    if (error != ESP_OK || cancelled.load()) {
+                        capture_stop.store(true);
+                        // Join RX cleanup before touching the codec or returning storage.
+                        while (!capture_done.load()) progress();
+                        break;
+                    }
                 }
-                samples += count;
-                progress();
+                drained_us = esp_timer_get_time();
+                audio_ok = capture_cleanup_ok;
+                if (!capture_ok || !audio_ok) error = ESP_FAIL;
+                set_phase(Phase::recognizing);
+                if (error == ESP_OK && !cancelled.load()) {
+                    error = recognition.finish(transcript, sizeof(transcript));
+                    transcript_us = esp_timer_get_time();
+                }
             }
-            // Always release RX and power, even after a failed read or cancellation.
-            audio_ok = local_ito_board::end_capture();
-            if (!audio_ok) error = ESP_FAIL;
-            printf("CAPTURE turn=%u samples=%u duration_ms=%u capped=%d\n", turn,
-                   unsigned(samples), unsigned(samples * 1000 / 16000), samples == limit);
         }
-    }
-    if (error == ESP_OK && !cancelled.load()) {
+        const auto closed = recognition.close(&metrics);
+        if (error == ESP_OK) error = closed;
+    } else if (error == ESP_OK && !cancelled.load()) {
         set_phase(Phase::recognizing);
-        progress();
-        oido_recognizer::Callbacks callbacks{is_cancelled, progress};
-        oido_recognizer::Metrics metrics;
         error = oido_recognizer::recognize(workspace, pcm, samples, transcript,
-                                           sizeof(transcript), callbacks, &metrics);
-        printf("STT turn=%u hot=%u psram=%u allocations=%u frames=%d setup_ms=%.1f feed_ms=%.1f finish_ms=%.1f\n",
-               turn, unsigned(metrics.hot_used), unsigned(metrics.psram_used), unsigned(metrics.allocations),
-               metrics.encoder_frames, metrics.setup_us / 1000.0, metrics.feed_us / 1000.0,
-               metrics.finish_us / 1000.0);
+                                           sizeof(transcript), {is_cancelled, progress}, &metrics);
+        transcript_us = esp_timer_get_time();
     }
+    printf("STT turn=%u hot=%u psram=%u allocations=%u frames=%d setup_ms=%.1f feed_ms=%.1f finish_ms=%.1f\n",
+           turn, unsigned(metrics.hot_used), unsigned(metrics.psram_used), unsigned(metrics.allocations),
+           metrics.encoder_frames, metrics.setup_us / 1000.0, metrics.feed_us / 1000.0,
+           metrics.finish_us / 1000.0);
     // Recognition has returned and destroyed all model/stream users of the lease.
     set_phase(Phase::restoring);
     if (leased) {
@@ -143,6 +173,10 @@ void run_turn()
     progress();
     const auto resumed = stopped && audio_ok ? itofs_service_resume() : ESP_FAIL;
     progress();
+    const int64_t resume_us = esp_timer_get_time();
+    printf("TURN_TIMING turn=%u last_input_us=%lld input_drained_us=%lld final_transcript_us=%lld resume_done_us=%lld backlog_samples=%u\n",
+           turn, (long long)(microphone ? last_input_us : 0), (long long)drained_us,
+           (long long)transcript_us, (long long)resume_us, unsigned(microphone ? capture_backlog : 0));
     if (resumed != ESP_OK) {
         transcript[0] = 0;
         set_phase(Phase::fault);
@@ -228,12 +262,31 @@ bool start()
     return true;
 }
 
-void poll()
+bool poll()
 {
     if (phase.load() == Phase::uploading && esp_timer_get_time() > upload_deadline) {
         set_phase(Phase::idle);
         printf("ERROR pcm upload timed out\n");
     }
+    if (phase.load() != Phase::recording || capture_done.load()) return false;
+    if (samples < limit && !cancelled.load() && !submitted.load() && !capture_stop.load()) {
+        const size_t count = std::min(size_t(320), limit - samples);
+        if (local_ito_board::read_capture_mono(pcm + samples, count)) {
+            last_input_us = esp_timer_get_time();
+            samples += count;
+            published.store(samples);
+        } else capture_ok = false;
+    }
+    if (samples == limit || cancelled.load() || submitted.load() || capture_stop.load() || !capture_ok) {
+        capture_backlog = samples - consumed.load();
+        capture_cleanup_ok = local_ito_board::end_capture();
+        printf("CAPTURE turn=%u samples=%u duration_ms=%u capped=%d\n", turn,
+               unsigned(samples), unsigned(samples * 1000 / 16000), samples == limit);
+        // Release publishes capture results and confirms RX/codec cleanup is over.
+        capture_done.store(true);
+        return false;
+    }
+    return true;
 }
 
 bool command(const char* line)

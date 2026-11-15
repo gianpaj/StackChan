@@ -12,19 +12,24 @@ Both speech models must fit on the robot before adding a Linux responder.
 A separate conversation build preserves the original face and uses USB to own
 one half-duplex turn. `listen [1..10]` starts bounded microphone capture; `send`
 submits early; `cancel` discards it. Oido v2b uses flash weights and greedy
-streaming decoding without the optional language model. Recording finishes
-before PCM is fed through the streaming API. The model stays flash-backed;
+streaming decoding without the optional language model. The USB control task captures PCM while the recognition worker feeds the
+streaming API. Model setup finishes before the LISTENING cue. The model stays flash-backed;
 mandatory transposed depthwise weights count in its measured workspace. The
 transcript is printed after recognition and Ito restoration. `echo` speaks that transcript;
 `text <reply>` accepts a manual response. Recognized text is data, never a
 console command. A bounded PCM16LE upload exercises fixed WAV fixtures without
 needing someone at the microphone.
 
-Ito parks before capture and lends both reserved inference regions. The
+Ito parks before capture and lends its hot arena and the PSRAM scratch tail,
+preserving its copied weights. The
 recognizer destroys every model/stream user before returning the lease. A
 12 KiB internal-stack worker keeps USB cancellation available and has its own
 watchdog subscription. Its stack and the 8 KiB USB control stack are reserved
-after the hot arena during early startup. Late stack allocations can fail
+after the hot arena during early startup. The existing USB task produces into
+the bounded PCM buffer and publishes complete reads atomically. It runs above
+recognition priority and polls USB without waiting between active RX reads.
+The recognition worker joins producer cleanup before closing Oido and returning
+the lease. This adds no task stack. Late stack allocations can fail
 even with enough total internal free memory. Buffered USB RX avoids polling
 one hardware FIFO every 20 ms while uploading fixed audio. Uncertain audio
 clock/power cleanup fails closed and requires reboot. Microphone power is enabled only during capture; motor power
@@ -43,6 +48,9 @@ Keeping both inference engines active wastes their shared phase budget.
 A 16 KiB recognizer stack consumes DMA memory needed by capture; the measured
 12 KiB stack retains 5,760 unused bytes. Late task-stack allocations can fail
 through fragmentation, so both stacks are reserved during early startup.
+A separate capture task would consume scarce internal SRAM. Feeding recognition
+in the RX read loop risks losing audio while an encoder chunk runs. The existing
+control task can produce PCM without either cost.
 A host recognizer would not prove local STT. Always-listening and automatic responses
 add behavior that the manual integration test does not require.
 
@@ -58,8 +66,8 @@ the boot self-test also passes. Recorded playback reports zero underruns.
 The user confirms an audible post-capture greeting and microphone-to-transcript
 -to-Ito echo with mouth animation and still motors. The model misrecognizes a
 proper name in this pilot. Greedy quality on the mixed public set is a separate
-measurement from host/device agreement. Recording precedes recognition, so the
-manual mode does not meet a two-second final-text target for long utterances.
+measurement from host/device agreement. The batch baseline records before recognition. Streaming latency is measured
+separately from that accepted baseline.
 
 The user independently confirms `listen 5`, then `echo` after
 `CONVERSATION READY`, from their own terminal. The supplied log verifies the
@@ -70,7 +78,9 @@ Oido uses 204,720 bytes of the borrowed hot region and 1,309,152 bytes of the
 borrowed PSRAM pool. The 320,000-byte recording buffer is separate. Ordinary
 free heap excludes the two reserved inference regions. A dedicated recognizer
 watchdog is fed only by its owner. CPU utilization and RX overflow counters are
-not instrumented. Further native cancellation, battery/reset and full recovery
+not instrumented. TURN_TIMING records completion of the last RX read, drained
+input, final recognition and restoration on the device monotonic clock. The last
+read timestamp is a software endpoint, not detected acoustic speech end. Further native cancellation, battery/reset and full recovery
 rehearsals remain deferred; host tests cover the implemented failure paths.
 
 The [command guide](../../../../firmware/LOCAL_CONVERSATION.md) describes the

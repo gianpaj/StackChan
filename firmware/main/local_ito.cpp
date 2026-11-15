@@ -124,11 +124,11 @@ void console_task(void*)
     bool overflow = false;
     for (;;) {
 #if CONFIG_STACKCHAN_CONVERSATION
-        local_conversation::poll();
+        const bool capturing = local_conversation::poll();
 #endif
         uint8_t input[64];
 #if CONFIG_STACKCHAN_CONVERSATION
-        const size_t count = usb_serial_jtag_read_bytes(input, sizeof(input), pdMS_TO_TICKS(20));
+        const size_t count = usb_serial_jtag_read_bytes(input, sizeof(input), capturing ? 0 : pdMS_TO_TICKS(20));
 #else
         size_t count = 0;
         while (count < sizeof(input) && usb_serial_jtag_ll_rxfifo_data_available()) {
@@ -206,7 +206,7 @@ void stackchan_start_local_ito()
     // Resume rebuilds the arena graph on this task. Match the proven boot stack.
 #if CONFIG_STACKCHAN_CONVERSATION
     if (!console_storage || !xTaskCreateStaticPinnedToCore(console_task, "local_console", control_stack_bytes,
-                                                         nullptr, 4, console_storage, &console_control, 0)) {
+                                                         nullptr, 6, console_storage, &console_control, 0)) {
 #else
     if (xTaskCreatePinnedToCore(console_task, "local_console", control_stack_bytes, nullptr, 4, nullptr, 0) != pdPASS) {
 #endif

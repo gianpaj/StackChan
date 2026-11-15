@@ -79,8 +79,8 @@ volume 50
 listen 5
 ```
 
-Wait for `LISTENING` before speaking. The robot records up to five seconds,
-then recognizes the complete recording and restores Ito. To finish early, type
+Wait for `LISTENING` before speaking. The robot recognizes speech while recording up to five seconds,
+then finishes the transcript and restores Ito using its retained weights. To finish early, type
 `send`. `cancel` discards an active recording or recognition. Wait for
 `CONVERSATION READY` before starting another turn.
 
@@ -98,9 +98,9 @@ answer. A failed or cancelled turn cannot be echoed. Recognized speech is never
 interpreted as a command. Speech can be cancelled with `cancel`.
 
 `listen` without a number records at most ten seconds. `listen N` accepts whole
-seconds from 1 to 10. There is no automatic end-of-speech detector. Recognition
-begins after recording ends, so submit-to-transcript latency includes all
-recognition work. Greedy decoding uses no optional language model. Check
+seconds from 1 to 10. There is no automatic end-of-speech detector. Model setup completes before `LISTENING`. Recognition consumes PCM during
+capture; only queued input, the final encoder chunk and Ito restoration remain
+after recording ends. Greedy decoding uses no optional language model. Check
 transcription quality on your own speech before relying on it.
 
 ## Fixed audio
@@ -148,7 +148,7 @@ limits. The mixed public WER is 19.63%; it is separate from host/device parity.
 
 ## Latency benchmark
 
-The [Ito host benchmark](https://github.com/gianpaj/ito/blob/94b0b45cb66414d57cb1ac71f5bc4936203feb9b/esp32/BENCHMARKING.md#stackchan-manual-speech-latency)
+The [Ito host benchmark](https://github.com/gianpaj/ito/blob/docs/stackchan-ito-plan/esp32/BENCHMARKING.md#stackchan-manual-speech-latency)
 runs from the Ito checkout and uses this firmware's existing USB timing hooks.
 It defaults to one recording and a supplied reply, with JSON/CSV results for STT,
 restoration and text-to-first-I2S latency. It does not invoke an LLM.
