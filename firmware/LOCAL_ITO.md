@@ -70,3 +70,18 @@ arguments include every item except the model. Keep the model offset and the
 image set together when flashing. An app-only update requires an already matching
 layout, model and assets. Full factory recovery requires the private verified
 16 MB backup and its matching NVS layout.
+
+### Boot after flashing
+
+For this ESP32-S3 USB connection, leave download mode with a whole-chip reset,
+then open the monitor without `--reset`:
+
+```sh
+python -m esptool --chip esp32s3 --port /dev/cu.usbmodem1101 \
+  --before no_reset --after watchdog_reset \
+  write_mem 0x6000812c 0x0 0x1
+```
+
+The masked write clears the temporary force-download bit before esptool resets
+the chip. A USB-only reset can retain the cached download-mode strap on this
+unit. The command requires the ROM download connection after flashing.

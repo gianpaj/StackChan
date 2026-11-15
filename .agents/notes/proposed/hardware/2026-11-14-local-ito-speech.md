@@ -1,5 +1,8 @@
 # Local Ito speech in the original application
 
+Status: deployed speech and face animation pass. Launcher re-entry validation
+is pending. The deployed code is `f799097`, with Ito runtime `b741244`.
+
 ## Decision
 
 Use the original StackChan face, launcher, setup controls and AW88298 codec.
@@ -50,8 +53,8 @@ The green-dot Ito bootloader, layout, models, app and matching NVS were restored
 and verified. It booted, passed both self-tests and played its greeting with zero
 underruns. This checks flash recovery, not factory cloud or motor operation.
 
-Integrated device memory, audio, mouth animation, cancel and re-entry validation
-remain the next checkpoint. Keep this note proposed until those results exist.
+Device memory, audio, mouth animation and cancellation are verified below.
+Keep this note proposed until launcher re-entry is verified.
 
 ## First boot and contiguous SRAM
 
@@ -78,9 +81,8 @@ to PSRAM was rejected for this checkpoint.
 
 The corrected build passes. Static DIRAM use is 108,179 bytes, compared with
 135,375 bytes in candidate 1. Initialization failures remain in an error/idle
-state instead of restarting repeatedly. Runtime memory and speech validation
-remain pending download-mode recovery. The corrected candidate is an app-only
-update because candidate 1's layout, model and assets are verified.
+state instead of restarting repeatedly. The corrected candidate is an app-only update because candidate 1's layout,
+model and assets are verified.
 
 ## Original face and remaining startup memory
 
@@ -101,6 +103,33 @@ and IMU modifiers are disabled in this profile, so their sensor initialization
 and head-touch worker are omitted. Display touch for the original menus stays
 active. The normal profile retains its original initialization.
 
-The new local build passes. Integrated speech validation remains pending the
-app-only update and startup check. No engine or model arithmetic changes are
-part of this correction.
+The local and normal firmware builds pass. No engine or model arithmetic
+changes are part of this correction.
+
+## Deployed validation
+
+The user confirms clear speech, the original mouth animating during speech and
+closing afterward, and stationary motors. Candidate 3 uses code `f799097`,
+Ito runtime `b741244`, and app SHA256
+`a5690f3955fe2f3b0ce360cbd7d0d2bdb31c3eda55dbb30a8146e99be59a0a1e`.
+The hot arena is 239,948 bytes in internal SRAM. The failed-full split verdict
+and its counters remain intact.
+
+- Boot self-test matches host PCM `363d7d98`, 134,100 samples.
+- Quiet numbers match host tokens and PCM `c4472e58`.
+- Spoken greeting and numbers have zero underruns. Greeting text arrival to first
+  I2S submission is 828.3 ms. This excludes DMA and acoustic latency.
+- Cancel flushes in 19.8 ms, closes the mouth and rejects queued old sentences.
+  A following numbers request plays successfully.
+- The 26-utterance paragraph produces 196 seconds of speech with zero underruns,
+  matching frontend tokens and no resets. Aggregate compute RTF is 1.0352.
+  The degraded warning remains; the strict RTF-below-1 gate does not pass.
+- Warm internal free memory is 13,202 bytes, with a 5,358-byte minimum. The same
+  free value remains after the paragraph. PSRAM is about 2.4 MB free after the
+  intentional quiet-text scratch ring is allocated.
+
+Evidence is in `firmware/build-local-ito/device-tests/`, including JSON results
+and session `20261115T075242.489421Z`. Private image manifests and recovery files
+remain outside Git. [Local Ito speech](../../../../firmware/LOCAL_ITO.md) is the
+canonical build, monitor and boot guide. Factory cloud/motor operation is outside
+this validation. Launcher re-entry remains the final physical check.
