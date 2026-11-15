@@ -188,4 +188,15 @@ and transitions independently.
 The USB task uses an 8 KiB internal stack because resume performs arena graph
 sizing on its caller. A 4 KiB task overflowed in `itofs_arena_bytes` and `layout`.
 The fixed-pool candidate reports 3,016 bytes remaining during resume. Flash API
-calls prevent moving this stack to PSRAM. Integrated 100-cycle results are pending.
+calls prevent moving this stack to PSRAM. The device completes 100 full-workspace overwrite/return/resume cycles.
+Every resume restores PSRAM weights without recalibration. Eleven golden
+commands yield 33 passing cases. A long diagnostic produces three safe stop
+timeouts; the fourth request succeeds, followed by golden output and speech.
+There are no unexpected resets during the 100-cycle loop. Global heap readings
+vary slightly; exact zero global heap drift is not claimed.
+
+[Shared workspace measurements](https://github.com/gianpaj/ito/blob/0c2c7cd5a0163755375fb8fe6ce191320d4595e5/results/stackchan/2026-11-15-local-stt-ito/README.md) record the 4,891,328-byte PSRAM
+lease, 239,948-byte internal lease, free heap, 447-448 ms weight reload and
+710-730 ms probe-return to resume-complete interval. Models, assets, layout and
+motor/microphone power policy remain unchanged. Actual STT and networking are
+separate integration work.

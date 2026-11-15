@@ -115,10 +115,13 @@ The masked write clears the temporary force-download bit before esptool resets
 the chip. A USB-only reset can retain the cached download-mode strap on this
 unit. The command requires the ROM download connection after flashing.
 
-The [device validation record](../.agents/notes/implemented/hardware/2026-11-14-local-ito-speech.md)
-contains the deployed image hash, golden PCM checks, cancellation timing and
-launcher re-entry results. Measured paragraph compute RTF is 1.0352, so the
-firmware retains `degraded=1`. The tested paragraph has zero playback underruns.
+The [local ownership note](../.agents/notes/implemented/hardware/2026-11-14-local-ito-speech.md)
+defines the codec, board and memory boundaries. The
+[shared workspace measurements](https://github.com/gianpaj/ito/blob/0c2c7cd5a0163755375fb8fe6ce191320d4595e5/results/stackchan/2026-11-15-local-stt-ito/README.md) include 100 device transitions,
+33 post-overwrite golden cases, safe timeout recovery and exact memory/timing
+records. The runtime lends 4,891,328 bytes of PSRAM and 239,948 bytes of internal
+SRAM while stopped. Both regions remain reserved and are separate from free heap.
 
-Detailed [performance and memory results](https://github.com/gianpaj/ito/blob/386fc611f91b07fa3fa57a4f8f0aaeb06e2ed652/results/stackchan/2026-11-15-original-face/README.md) include per-utterance JSON,
-heap snapshots, exact audio durations and the captured measurement trace.
+The [original-face baseline](https://github.com/gianpaj/ito/blob/386fc611f91b07fa3fa57a4f8f0aaeb06e2ed652/results/stackchan/2026-11-15-original-face/README.md)
+contains the 196-second paragraph check and compute RTF 1.0352. `degraded=1`
+remains enabled. Microphone/STT and native Tailscale integration are pending.
