@@ -145,3 +145,10 @@ clips matching the host and twenty microphone handoffs with exact 1-, 3- and
 [Results and measurements](https://github.com/gianpaj/ito/blob/e3df8e75a0ac115670a547db7f5c35f1084d5bb4/results/stackchan/2026-11-15-manual-oido/README.md) include native memory, stack headroom,
 recognition timing, public-set WER, golden PCM, image/model hashes and known
 limits. The mixed public WER is 19.63%; it is separate from host/device parity.
+
+## Latency benchmark
+
+The [Ito host benchmark](https://github.com/gianpaj/ito/blob/94b0b45cb66414d57cb1ac71f5bc4936203feb9b/esp32/BENCHMARKING.md#stackchan-manual-speech-latency)
+runs from the Ito checkout and uses this firmware's existing USB timing hooks.
+It defaults to one recording and a supplied reply, with JSON/CSV results for STT,
+restoration and text-to-first-I2S latency. It does not invoke an LLM.
