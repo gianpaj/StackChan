@@ -469,8 +469,8 @@ bool CoreS3AudioCodec::LocalStartCapture()
     format.sample_rate = 16000;
     format.mclk_multiple = 256;
     if (in_codec_if_->set_fs(in_codec_if_, &format) != ESP_CODEC_DEV_OK ||
-        in_codec_if_->set_mic_gain(in_codec_if_, 30) != ESP_CODEC_DEV_OK ||
         in_codec_if_->enable(in_codec_if_, true) != ESP_CODEC_DEV_OK ||
+        in_codec_if_->set_mic_gain(in_codec_if_, 30) != ESP_CODEC_DEV_OK ||
         in_codec_if_->mute_mic(in_codec_if_, false) != ESP_CODEC_DEV_OK) {
         return fail();
     }

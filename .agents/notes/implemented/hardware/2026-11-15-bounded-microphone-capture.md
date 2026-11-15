@@ -17,6 +17,8 @@ every successful start, including failed reads, early submission and cancel.
 Capture mutes and flushes the speaker, disables TX and releases its pin routing.
 The same codec creates RX on I2S0, powers ALDO2 and initializes ES7210. It discards
 three 320-sample startup buffers. Each subsequent driver read has a 40 ms timeout.
+ES7210 enable selects microphones and rewrites their gain registers from its
+cached defaults. Capture applies 30 dB gain after enable and before unmute.
 Capture statistics report delivered samples, peak magnitude, clipped samples
 and elapsed time. PCM remains in the controller's buffer.
 

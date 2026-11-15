@@ -39,7 +39,7 @@ struct State {
     std::string failure;
     bool failed = false, tx_running = true, rx_allocated = false, rx_running = false;
     bool mic_power = false, ctrl = false, adc = false, speaker_muted = false;
-    int power_off_attempts = 0, write_calls = 0;
+    int power_off_attempts = 0, write_calls = 0, gain_db = 0;
     std::vector<std::string> events;
 } s;
 int tx_cookie, rx_cookie;
@@ -102,8 +102,17 @@ int adc_fs(const audio_codec_if_t*, esp_codec_dev_sample_info_t* fs) {
     assert(fs->sample_rate == 16000 && fs->bits_per_sample == 16);
     return pass("adc_fs") ? ESP_OK : ESP_FAIL;
 }
-int adc_gain(const audio_codec_if_t*, float gain) { assert(gain == 30); return pass("adc_gain") ? ESP_OK : ESP_FAIL; }
-int adc_enable(const audio_codec_if_t*, bool enable) { return pass(enable ? "adc_enable" : "adc_disable") ? ESP_OK : ESP_FAIL; }
+int adc_gain(const audio_codec_if_t*, float gain) {
+    assert(gain == 30);
+    if (!pass("adc_gain")) return ESP_FAIL;
+    s.gain_db = gain; return ESP_OK;
+}
+int adc_enable(const audio_codec_if_t*, bool enable) {
+    if (!pass(enable ? "adc_enable" : "adc_disable")) return ESP_FAIL;
+    // ES7210 start selects microphones and rewrites gain from its zeroed cache.
+    if (enable) s.gain_db = 0;
+    return ESP_OK;
+}
 int adc_mute(const audio_codec_if_t*, bool) { return pass("adc_unmute") ? ESP_OK : ESP_FAIL; }
 int output_mute(const audio_codec_if_t*, bool mute) { s.speaker_muted = mute; return ESP_OK; }
 audio_codec_if_t adc_if{adc_fs, adc_gain, adc_enable, adc_mute}, output_if{nullptr, nullptr, nullptr, nullptr, output_mute};
@@ -144,6 +153,7 @@ int main() {
     {
         CoreS3AudioCodec c;
         assert(c.LocalStartCapture());
+        assert(s.gain_db == 30);
         assert(s.mic_power && s.rx_running && !s.tx_running && s.speaker_muted);
         assert(!c.LocalWrite(pcm, 160) && !c.LocalMute(false));
         assert(!c.LocalReadCapture(pcm, 321));
