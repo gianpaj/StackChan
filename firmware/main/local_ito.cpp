@@ -39,27 +39,28 @@ void report_memory(const char* stage)
 
 esp_err_t probe_workspace()
 {
-    void* hot = nullptr;
-    size_t bytes = 0;
-    auto error = itofs_service_borrow_hot(&hot, &bytes);
+    itofs_workspace_t workspace = {};
+    auto error = itofs_service_borrow_memory(&workspace);
     if (error != ESP_OK) return error;
     // Model the next engine's exclusive ownership, without changing flash.
-    std::memset(hot, 0xa5, bytes);
-    constexpr size_t psram_bytes = 3 * 1024 * 1024;
-    auto* psram = static_cast<uint8_t*>(heap_caps_malloc(psram_bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-    if (psram) {
-        std::memset(psram, 0x5a, psram_bytes);
-        volatile uint8_t* check = psram;
-        for (size_t i = 0; i < psram_bytes; ++i) {
+    std::memset(workspace.hot, 0xa5, workspace.hot_bytes);
+    volatile uint8_t* hot_check = static_cast<uint8_t*>(workspace.hot);
+    for (size_t i = 0; i < workspace.hot_bytes; ++i) {
+        if (hot_check[i] != 0xa5) { error = ESP_FAIL; break; }
+    }
+    if (workspace.psram && workspace.psram_bytes >= 3 * 1024 * 1024) {
+        std::memset(workspace.psram, 0x5a, workspace.psram_bytes);
+        volatile uint8_t* check = static_cast<uint8_t*>(workspace.psram);
+        for (size_t i = 0; i < workspace.psram_bytes; ++i) {
             if (check[i] != 0x5a) { error = ESP_FAIL; break; }
         }
-        heap_caps_free(psram);
     } else {
         error = ESP_ERR_NO_MEM;
     }
-    const auto returned = itofs_service_return_hot(hot);
+    const auto returned = itofs_service_return_memory(&workspace);
     if (error == ESP_OK) error = returned;
-    if (error == ESP_OK) printf("WORKSPACE internal=%u psram=%u checked\n", unsigned(bytes), unsigned(psram_bytes));
+    if (error == ESP_OK) printf("WORKSPACE internal=%u psram=%u checked\n",
+                                unsigned(workspace.hot_bytes), unsigned(workspace.psram_bytes));
     return error;
 }
 

@@ -68,21 +68,23 @@ and USB speech startup.
 
 `memory` reports free, largest and lifetime-minimum internal/PSRAM heap bytes,
 plus unused space in the 8 KiB internal USB control stack.
-`tts stop` cancels playback, closes the mouth and parks inference workers before
-returning inference buffers to the PSRAM heap. Wait for `OK tts stop` before
-using the released memory. A timeout retains ownership; retry stop to finish.
-An `ESP_FAIL` from a latched kernel/DMA parking error retains ownership and
-requires `reboot`; retry cannot prove that a timed-out DMA transfer finished.
-`tts resume` reacquires the buffers and rebuilds the engine without calibration
-or changing volume. Worker stacks, frontend state, kernel scratch and codec DMA
-remain allocated. This is an inference-memory handoff, not a full service unload.
+`tts stop` cancels playback, closes the mouth and parks inference workers.
+After `OK tts stop`, the internal hot arena and PSRAM inference workspace can
+be borrowed exclusively. They stay reserved, so free-heap numbers exclude them.
+Worker stacks, frontend state, kernel scratch and codec DMA also remain owned.
+A timeout retains ownership; retry stop to finish. A latched kernel/DMA parking
+error returns `ESP_FAIL` and requires `reboot` because completion is uncertain.
 
-`tts probe` requires a successful stop. It overwrites the reserved internal
-workspace, allocates and checks a temporary 3 MiB PSRAM buffer, then returns both.
-Resume and run `test` to check golden PCM after this simulated engine handoff.
-The probe does not run STT. The internal workspace stays reserved rather than
-entering the general heap, so its 239,948 bytes do not appear as free heap.
-Text commands are rejected while stopped. `reboot` also works while stopped.
+`tts probe` requires a successful stop. It borrows both regions, overwrites and
+checks every byte, prints their sizes, then returns ownership. It does not run
+STT. `tts resume` reloads weights and rebuilds the engine in those same regions,
+without recalibration or changing volume. Text commands are rejected while
+stopped. `reboot` remains available while stopped or after an error.
+
+Run `test` after resume to verify golden PCM. The dedicated PSRAM workspace
+avoids repeated large heap allocations. The internal arena stays contiguous.
+A borrower must return both regions and release every derived pointer before
+resuming Ito.
 
 ## Flash and recovery
 

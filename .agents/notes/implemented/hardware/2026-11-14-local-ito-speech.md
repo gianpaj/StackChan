@@ -172,20 +172,20 @@ flash backups remain outside Git.
 ## USB inference handoff
 
 The local application owns the USB task, so control remains available while Ito
-is stopped. `memory` reports allocator bytes. `tts stop` and `tts resume` call
-the shared service lifecycle. `tts probe` temporarily borrows the reserved hot
-workspace and checks a separate 3 MiB PSRAM allocation. It exercises ownership
-without adding STT or changing flash storage.
+is stopped. `memory` reports allocator bytes and the control-stack watermark.
+`tts stop` and `tts resume` call the shared service lifecycle. `tts probe` borrows
+both reserved ranges, overwrites and checks their bytes, then returns ownership.
+It exercises memory reuse without adding STT or changing flash storage. Heap
+figures exclude the borrowed internal/PSRAM ranges because they stay reserved.
 
-The [service header](https://github.com/gianpaj/ito/blob/50d7d491187e0318b07603d4281705ce625ece49/esp32/runtime/itofs_service.h) defines
-resource ownership and failure behavior. The source is pinned in `repos.json`.
-The codec remains open, volume persists, and the face stays in standby during
-a handoff. Reboot remains available through USB when inference is stopped or
-parking fails. Keeping control inside Ito's console was rejected because the
-application must own transitions and diagnostics independently of admission.
+The [service header](https://github.com/gianpaj/ito/blob/4b4b37fb02d014eebc01d4c5afb973b514db7d2b/esp32/runtime/itofs_service.h)
+defines ownership and failures. `repos.json` pins the source. The codec remains
+open, volume persists, and the face stays in standby during the handoff. USB
+reboot works when inference is stopped or parking fails. Keeping control inside
+Ito's command admission was rejected because the application must own diagnostics
+and transitions independently.
 
-The USB task has an 8 KiB internal stack because resume performs arena graph
-sizing on its caller. A 4 KiB control stack overflowed during the first resume;
-the private trace identifies `itofs_arena_bytes` and `layout`. The control
-watermark is reported with `memory`. Integrated device handoff measurements
-are pending.
+The USB task uses an 8 KiB internal stack because resume performs arena graph
+sizing on its caller. A 4 KiB task overflowed in `itofs_arena_bytes` and `layout`.
+The fixed-pool candidate reports 3,016 bytes remaining during resume. Flash API
+calls prevent moving this stack to PSRAM. Integrated 100-cycle results are pending.
